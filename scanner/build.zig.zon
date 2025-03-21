@@ -1,0 +1,12 @@
+.{
+    .name = .wayland_scanner,
+    .version = "0.0.1",
+    .minimum_zig_version = "0.14.0",
+    .fingerprint = 0x501ba345ac7ee471,
+
+    .paths = .{
+        "build.zig.zon",
+        "build.zig",
+        "src",
+    },
+}
