@@ -46,7 +46,6 @@ pub fn writeProtocols(self: *Self) !void {
     try self.writer.print("pub const Display = @import(\"Display.zig\");\n", .{});
     for (self.protocols.items) |*protocol| {
         try protocol.finalize();
-        try protocol.write(self.dependencies.items);
         try self.writer.print("pub usingnamespace @import(\"{s}.zig\");\n", .{protocol.name});
     }
 
@@ -57,7 +56,16 @@ pub fn writeProtocols(self: *Self) !void {
     for (self.protocols.items) |protocol| {
         try event_writer.print("const {s} = @import(\"{s}.zig\");\n", .{ protocol.name, protocol.name });
     }
-    try event_writer.print("pub const Event = union(enum) {{\n", .{});
+    try event_writer.print("pub const EventType = enum(u32) {{\n", .{});
+    for (self.protocols.items) |protocol| {
+        for (protocol.interfaces.items) |interface| {
+            for (interface.events.items) |event| {
+                try event_writer.print("\t{s}_{s},\n", .{ interface.name, event.name });
+            }
+        }
+    }
+    try event_writer.print("}};\n", .{});
+    try event_writer.print("pub const Event = union(EventType) {{\n", .{});
     for (self.protocols.items) |protocol| {
         for (protocol.interfaces.items) |interface| {
             for (interface.events.items) |event| {
@@ -74,6 +82,8 @@ pub fn writeProtocols(self: *Self) !void {
     try event_writer.print("}};\n", .{});
 
     try self.writer.print("pub usingnamespace @import(\"event.zig\");\n", .{});
+
+    for (self.protocols.items) |protocol| try protocol.write(self.dependencies.items);
 }
 
 pub const DependencyInfo = struct {

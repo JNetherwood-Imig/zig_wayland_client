@@ -286,6 +286,14 @@ pub const Interface = struct {
         try writer.print("pub const {s} = struct {{\n", .{self.type_name});
         try writer.print("\tproxy: Object,\n", .{});
         try writer.print("\tpub const interface = \"{s}\";\n", .{self.name});
+        if (self.events.items.len > 0) {
+            try writer.print(
+                "\tpub const event0_index: u32 = @intFromEnum(@import(\"event.zig\").Event.{s}_{s});\n",
+                .{ self.name, self.events.items[0].name },
+            );
+        } else {
+            try writer.print("\tpub const event0_index: u32 = 0;\n", .{});
+        }
         for (self.requests.items) |request| try request.write(writer);
         for (self.events.items) |event| try event.write(writer);
         for (self.enums.items) |@"enum"| try @"enum".write(writer);

@@ -7,9 +7,22 @@ const id: u32 = 1;
 next_id: u32 = 2,
 sockfd: std.posix.socket_t = -1,
 epollfd: std.posix.fd_t = -1,
-message_buf: [std.math.maxInt(u16)]u8 = undefined,
+parent: Object,
+objects: std.ArrayList(Object),
+allocator: std.mem.Allocator,
+read_buf: []u8,
 
-pub fn connect() !Self {
+pub const ErrorEvent = struct {
+    object_id: u32,
+    code: u32,
+    message: []const u8,
+};
+
+pub const DeleteIdEvent = struct {
+    id: u32,
+};
+
+pub fn connect(allocator: std.mem.Allocator) !Self {
     const sock: std.posix.socket_t = init: {
         const wayland_sock = std.posix.getenv("WAYLAND_SOCK");
         if (wayland_sock) |s| {
@@ -51,30 +64,42 @@ pub fn connect() !Self {
 
     try std.posix.epoll_ctl(epoll, std.os.linux.EPOLL.CTL_ADD, sock, &ev);
 
+    var objects = std.ArrayList(Object).init(allocator);
+    const parent = Object{ .id = id, .display = undefined, .event0_index = 0 };
+    try objects.append(parent);
+
     return Self{
         .sockfd = sock,
         .epollfd = epoll,
+        .parent = parent,
+        .objects = objects,
+        .allocator = allocator,
+        .read_buf = try allocator.alloc(u8, 1),
     };
 }
 
 pub fn disconnect(self: Self) void {
+    self.allocator.free(self.read_buf);
+    self.objects.deinit();
     std.posix.close(self.epollfd);
     std.posix.close(self.sockfd);
 }
 
 pub fn sync(self: *Self) !wl.Callback {
+    self.parent.display = self;
     return try Object.sendCreateRequest(
-        Object{ .id = id, .display = self },
+        self.parent,
         wl.Callback,
         self,
         0,
-        .{Object.Arg{ .new_id = .{ .id = 0 } }},
+        .{Object.Arg{ .new_id = .{} }},
     );
 }
 
 pub fn getRegistry(self: *Self) !wl.Registry {
+    self.parent.display = self;
     return try Object.sendCreateRequest(
-        Object{ .id = id, .display = self },
+        self.parent,
         wl.Registry,
         self,
         1,
@@ -93,39 +118,49 @@ const MessageHeader = packed struct {
     length: u16,
 };
 
-pub fn getNextEvent(self: Self, allocator: std.mem.Allocator) ?wl.Event {
+pub fn getNextEvent(self: *Self) !?wl.Event {
     const max_events = 32;
     var events: [max_events]std.os.linux.epoll_event = undefined;
     const event_count = std.os.linux.epoll_wait(self.epollfd, &events, max_events, -1);
     for (events[0..event_count]) |ev| {
-        if (ev.data.fd != self.sockfd) continue;
-
-        var head: MessageHeader = undefined;
-        var read = std.posix.read(self.sockfd, @as([*]u8, @ptrCast(@alignCast(&head)))[0..8]) catch return null;
-
-        if (read == 0) return null;
-
-        const object: u32 = head.object;
-        const event: u32 = @intCast(head.opcode);
-        const len: usize = @intCast(head.length - 8);
-        const buf = allocator.alloc(u8, len) catch return null;
-        defer allocator.free(buf);
-
-        read = std.posix.read(self.sockfd, buf) catch return null;
-        std.debug.assert(read == len);
-
-        if (object == 2 and event == 0) {
-            return wl.Event{ .wl_registry_global = .{
-                .name = @as(*u32, @ptrCast(@alignCast(&buf[0]))).*,
-                .interface = blk: {
-                    const strlen: usize = @intCast(@as(*u32, @ptrCast(@alignCast(&buf[4]))).*);
-                    break :blk allocator.dupe(u8, buf[8 .. strlen + 7]) catch return null;
-                },
-                .version = @as(*u32, @ptrCast(@alignCast(&buf[len - 4]))).*,
-            } };
-        }
-
-        return wl.Event{ .wl_callback_done = .{ .callback_data = 0 } };
+        if (ev.data.fd != self.sockfd) continue; // TODO handle internal events as necessary
+        return try nextSockEvent(self);
     }
+    return null;
+}
+
+fn nextSockEvent(self: *Self) !?wl.Event {
+    var head: MessageHeader = undefined;
+    const read = try std.posix.read(self.sockfd, @as([*]u8, @ptrCast(@alignCast(&head)))[0..8]);
+
+    if (read == 0) return null;
+
+    const object_id: u32 = head.object;
+    const event: u32 = @intCast(head.opcode);
+    const len: usize = @intCast(head.length - 8);
+    self.allocator.free(self.read_buf);
+    self.read_buf = try self.allocator.alloc(u8, len);
+
+    _ = try std.posix.read(self.sockfd, self.read_buf);
+
+    const object: Object = for (self.objects.items) |obj| {
+        if (obj.id == object_id) break obj;
+    } else unreachable;
+
+    const evt: wl.EventType = @enumFromInt(object.event0_index + event);
+    _ = evt;
+
+    if (object_id == 2 and event == 0) {
+        return wl.Event{ .wl_registry_global = .{
+            .name = @as(*u32, @ptrCast(@alignCast(&self.read_buf[0]))).*,
+            .interface = blk: {
+                const strlen: usize = @intCast(@as(*u32, @ptrCast(@alignCast(&self.read_buf[4]))).*);
+                break :blk self.read_buf[8 .. strlen + 7];
+            },
+            .version = @as(*u32, @ptrCast(@alignCast(&self.read_buf[len - 4]))).*,
+        } };
+    }
+
+    // TODO remove this
     return null;
 }
