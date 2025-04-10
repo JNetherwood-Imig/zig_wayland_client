@@ -1,11 +1,11 @@
 .{
-    .name = .wayland_protocols_test,
+    .name = .wayland_test,
     .version = "0.0.1",
     .minimum_zig_version = "0.14.0",
-    .fingerprint = 0x81ccccbe9178e4cb,
+    .fingerprint = 0x1d8318d56fb07adc,
 
     .dependencies = .{
-        .wayland_protocols = .{
+        .wayland = .{
             .path = "..",
         },
     },

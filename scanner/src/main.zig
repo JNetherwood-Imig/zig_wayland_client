@@ -10,10 +10,17 @@ pub fn main() !void {
     const args = try std.process.argsAlloc(allocator);
     defer std.process.argsFree(allocator, args);
 
-    var ctx = Context.init(allocator);
+    const mode: Context.Mode = if (std.mem.eql(u8, args[1], "client"))
+        .client
+    else if (std.mem.eql(u8, args[1], "server"))
+        .server
+    else
+        std.debug.panic("Expected a mode argument but got {s}", .{args[1]});
+
+    var ctx = Context.init(allocator, mode);
     defer ctx.deinit();
 
-    for (args[1..]) |arg| {
+    for (args[2..]) |arg| {
         if (std.mem.startsWith(u8, arg, "-o")) {
             if (ctx.out_file != null) {
                 std.log.err("Cannot specify multiple output files", .{});

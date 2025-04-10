@@ -1,6 +1,6 @@
 const std = @import("std");
 const Parser = @import("Parser.zig");
-const Protocol = @import("elements.zig").Protocol;
+const Protocol = @import("Protocol.zig");
 
 const Self = @This();
 
@@ -10,14 +10,21 @@ writer: std.fs.File.Writer,
 files: std.ArrayList(std.fs.File),
 protocols: std.ArrayList(Protocol),
 dependencies: std.ArrayList(DependencyInfo),
+mode: Mode,
 
-pub fn init(allocator: std.mem.Allocator) Self {
+pub const Mode = enum(u1) {
+    client,
+    server,
+};
+
+pub fn init(allocator: std.mem.Allocator, mode: Mode) Self {
     return .{
         .allocator = allocator,
         .files = std.ArrayList(std.fs.File).init(allocator),
         .protocols = std.ArrayList(Protocol).init(allocator),
         .writer = std.io.getStdOut().writer(),
         .dependencies = std.ArrayList(DependencyInfo).init(allocator),
+        .mode = mode,
     };
 }
 
@@ -34,6 +41,13 @@ pub fn addFile(self: *Self, file: std.fs.File) !void {
 }
 
 pub fn writeProtocols(self: *Self) !void {
+    switch (self.mode) {
+        .client => try writeClientProtocols(self),
+        .server => try writeServerProtocols(self),
+    }
+}
+
+fn writeClientProtocols(self: *Self) !void {
     for (self.files.items) |file| {
         const protocol = try Protocol.init(self.allocator, file);
         try self.protocols.append(protocol);
@@ -43,7 +57,6 @@ pub fn writeProtocols(self: *Self) !void {
         });
     }
 
-    try self.writer.print("pub const Display = @import(\"Display.zig\");\n", .{});
     for (self.protocols.items) |*protocol| {
         try protocol.finalize();
         try self.writer.print("pub usingnamespace @import(\"{s}.zig\");\n", .{protocol.name});
@@ -60,7 +73,7 @@ pub fn writeProtocols(self: *Self) !void {
     for (self.protocols.items) |protocol| {
         for (protocol.interfaces.items) |interface| {
             for (interface.events.items) |event| {
-                try event_writer.print("\t{s}_{s},\n", .{ interface.name, event.name });
+                try event_writer.print("\t{s}_{s},\n", .{ std.mem.trimLeft(u8, interface.name, "wl_"), event.name });
             }
         }
     }
@@ -70,7 +83,7 @@ pub fn writeProtocols(self: *Self) !void {
         for (protocol.interfaces.items) |interface| {
             for (interface.events.items) |event| {
                 try event_writer.print("\t{s}_{s}: {s}.{s}.{s}Event,\n", .{
-                    interface.name,
+                    std.mem.trimLeft(u8, interface.name, "wl_"),
                     event.name,
                     protocol.name,
                     interface.type_name,
@@ -84,6 +97,22 @@ pub fn writeProtocols(self: *Self) !void {
     try self.writer.print("pub usingnamespace @import(\"event.zig\");\n", .{});
 
     for (self.protocols.items) |protocol| try protocol.write(self.dependencies.items);
+}
+
+fn writeServerProtocols(self: *Self) !void {
+    for (self.files.items) |file| {
+        const protocol = try Protocol.init(self.allocator, file);
+        try self.protocols.append(protocol);
+        for (protocol.interfaces.items) |interface| try self.dependencies.append(DependencyInfo{
+            .interface = interface.type_name,
+            .protocol = protocol.name,
+        });
+    }
+
+    for (self.protocols.items) |*protocol| {
+        try protocol.finalize();
+        try self.writer.print("pub usingnamespace @import(\"{s}.zig\");\n", .{protocol.name});
+    }
 }
 
 pub const DependencyInfo = struct {

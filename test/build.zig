@@ -10,7 +10,7 @@ pub fn build(b: *std.Build) void {
         b.path("linux-drm-syncobj-v1.xml"),
     };
 
-    const wayland_protocols = b.dependency("wayland_protocols", .{
+    const wayland = b.dependency("wayland", .{
         .files = files,
     });
 
@@ -21,7 +21,7 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = optimize,
             .imports = &.{
-                .{ .name = "wayland_client", .module = wayland_protocols.module("root") },
+                .{ .name = "wayland_client", .module = wayland.module("client") },
             },
         }),
     });

@@ -1,8 +1,8 @@
 .{
-    .name = .wayland_protocols,
+    .name = .wayland,
     .version = "0.0.1",
     .minimum_zig_version = "0.14.0",
-    .fingerprint = 0xf4571e4465052113,
+    .fingerprint = 0xa8d655e712add01,
 
     .dependencies = .{
         .scanner = .{

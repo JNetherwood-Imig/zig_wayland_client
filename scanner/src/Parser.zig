@@ -1,7 +1,5 @@
 const std = @import("std");
-
-const Protocol = @import("elements.zig").Protocol;
-
+const Protocol = @import("Protocol.zig");
 const Self = @This();
 
 allocator: std.mem.Allocator,
