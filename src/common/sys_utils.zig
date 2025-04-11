@@ -1,6 +1,7 @@
 const std = @import("std");
 const posix = std.posix;
 const linux = std.os.linux;
+
 pub const Fd = posix.fd_t;
 
 pub const Epoll = struct {
@@ -51,9 +52,19 @@ pub const Epoll = struct {
     };
 
     pub const CtlError = posix.EpollCtlError;
-    pub inline fn ctl(self: Epoll, op: Ctl, fd: Fd, event: ?Event) CtlError!void {
+    pub inline fn ctl(
+        self: Epoll,
+        op: Ctl,
+        fd: Fd,
+        event: ?Event,
+    ) CtlError!void {
         var ev = event;
-        return try posix.epoll_ctl(self.handle, @intFromEnum(op), fd, @ptrCast(&ev));
+        return try posix.epoll_ctl(
+            self.handle,
+            @intFromEnum(op),
+            fd,
+            @ptrCast(&ev),
+        );
     }
 
     pub const WaitError = error{
@@ -61,8 +72,17 @@ pub const Epoll = struct {
         InterruptedSystemCall,
         Unexpected,
     };
-    pub inline fn wait(self: Epoll, events: []Event, timeout: i32) WaitError!usize {
-        const ret = linux.epoll_wait(self.handle, @ptrCast(events.ptr), events.len, timeout);
+    pub inline fn wait(
+        self: Epoll,
+        events: []Event,
+        timeout: i32,
+    ) WaitError!usize {
+        const ret = linux.epoll_wait(
+            self.handle,
+            @ptrCast(events.ptr),
+            @intCast(events.len),
+            timeout,
+        );
         return switch (posix.errno(ret)) {
             .SUCCESS => ret,
             .FAULT => error.BadAddress,
@@ -90,14 +110,49 @@ pub const Pipe = struct {
     }
 
     pub inline fn getWriteFd(self: Pipe) Fd {
-        return self.hadnle[1];
+        return self.handle[1];
     }
+};
+
+const SIG = linux.SIG;
+
+pub const Sig = enum(u32) {
+    hangup = SIG.HUP,
+    interrupt = SIG.INT,
+    quit = SIG.QUIT,
+    illegal_instruction = SIG.ILL,
+    trap = SIG.TRAP,
+    aborted = SIG.ABRT,
+    bus_error = SIG.BUS,
+    floating_point_exception = SIG.FPE,
+    kill = SIG.KILL,
+    user_1 = SIG.USR1,
+    segmentation_fault = SIG.SEGV,
+    user_2 = SIG.USR2,
+    broken_pipe = SIG.PIPE,
+    alarm = SIG.ALRM,
+    terminated = SIG.TERM,
+    stack_fault = SIG.STKFLT,
+    child_status_changed = SIG.CHLD,
+    @"continue" = SIG.CONT,
+    stop = SIG.STOP,
+    stop_user = SIG.TSTP,
+    stop_tty_in = SIG.TTIN,
+    stop_tty_out = SIG.TTOU,
+    urgent_io = SIG.URG,
+    cpu_time_limit_exceeded = SIG.XCPU,
+    file_size_limit_exceeded = SIG.XFSZ,
+    virtual_timer_expired = SIG.VTALRM,
+    profiling_timer_expired = SIG.PROF,
+    io_possible = SIG.IO,
+    power_failure = SIG.PWR,
+    bad_syscall = SIG.SYS,
 };
 
 pub const Signalfd = struct {
     handle: Fd,
 
-    pub const Signals = struct {
+    pub const Signals = packed struct {
         hangup: bool = false,
         interrupt: bool = false,
         quit: bool = false,
@@ -105,7 +160,7 @@ pub const Signalfd = struct {
         trap: bool = false,
         aborted: bool = false,
         bus_error: bool = false,
-        float_exception: bool = false,
+        floating_point_exception: bool = false,
         kill: bool = false,
         user_1: bool = false,
         segmentation_fault: bool = false,
@@ -121,10 +176,10 @@ pub const Signalfd = struct {
         stop_tty_in: bool = false,
         stop_tty_out: bool = false,
         urgent_io: bool = false,
-        cpu_time_limit: bool = false,
-        file_size_limit: bool = false,
-        virtual_timer: bool = false,
-        profiling_timer: bool = false,
+        cpu_time_limit_exceeded: bool = false,
+        file_size_limit_exceeded: bool = false,
+        virtual_timer_expired: bool = false,
+        profiling_timer_expired: bool = false,
         io_possible: bool = false,
         power_failure: bool = false,
         bad_syscall: bool = false,
@@ -137,43 +192,23 @@ pub const Signalfd = struct {
         InodeMountFail,
     };
 
-    pub fn create(comptime signals: Signals) CreateError!Signalfd {
-        const SIG = linux.SIG;
+    pub fn create(signals: Signals) CreateError!Signalfd {
         var set: linux.sigset_t = linux.empty_sigset;
-        if (signals.hangup) linux.sigaddset(&set, SIG.HUP);
-        if (signals.interrupt) linux.sigaddset(&set, SIG.INT);
-        if (signals.quit) linux.sigaddset(&set, SIG.QUIT);
-        if (signals.illegal_instruction) linux.sigaddset(&set, SIG.ILL);
-        if (signals.trap) linux.sigaddset(&set, SIG.TRAP);
-        if (signals.aborted) linux.sigaddset(&set, SIG.ABRT);
-        if (signals.bus_error) linux.sigaddset(&set, SIG.BUS);
-        if (signals.float_exception) linux.sigaddset(&set, SIG.FPE);
-        if (signals.kill) linux.sigaddset(&set, SIG.KILL);
-        if (signals.user_1) linux.sigaddset(&set, SIG.USR1);
-        if (signals.segmentation_fault) linux.sigaddset(&set, SIG.SEGV);
-        if (signals.user_2) linux.sigaddset(&set, SIG.USR2);
-        if (signals.broken_pipe) linux.sigaddset(&set, SIG.PIPE);
-        if (signals.alarm) linux.sigaddset(&set, SIG.ALRM);
-        if (signals.terminated) linux.sigaddset(&set, SIG.TERM);
-        if (signals.stack_fault) linux.sigaddset(&set, SIG.STKFLT);
-        if (signals.child_status_changed) linux.sigaddset(&set, SIG.CHLD);
-        if (signals.@"continue") linux.sigaddset(&set, SIG.CONT);
-        if (signals.stop) linux.sigaddset(&set, SIG.STOP);
-        if (signals.stop_user) linux.sigaddset(&set, SIG.TSTP);
-        if (signals.stop_tty_in) linux.sigaddset(&set, SIG.TTIN);
-        if (signals.stop_tty_out) linux.sigaddset(&set, SIG.TTOU);
-        if (signals.urgent_io) linux.sigaddset(&set, SIG.URG);
-        if (signals.cpu_time_limit) linux.sigaddset(&set, SIG.XCPU);
-        if (signals.file_size_limit) linux.sigaddset(&set, SIG.XFSZ);
-        if (signals.virtual_timer) linux.sigaddset(&set, SIG.VTALRM);
-        if (signals.profiling_timer) linux.sigaddset(&set, SIG.PROF);
-        if (signals.io_possible) linux.sigaddset(&set, SIG.IO);
-        if (signals.power_failure) linux.sigaddset(&set, SIG.PWR);
-        if (signals.bad_syscall) linux.sigaddset(&set, SIG.SYS);
+        inline for (@typeInfo(Signals).@"struct".fields) |field|
+            if (@field(signals, field.name))
+                linux.sigaddset(&set, @intFromEnum(@field(Sig, field.name)));
 
         posix.sigprocmask(SIG.BLOCK, &set, null);
 
-        return .{ .handle = try posix.signalfd(-1, &set, linux.SFD.NONBLOCK) };
+        const fd = posix.signalfd(-1, &set, linux.SFD.NONBLOCK) catch |err|
+            return switch (err) {
+                error.SystemFdQuotaExceeded => error.SystemFdQuotaExceeded,
+                error.SystemResources => error.SystemResources,
+                error.ProcessResources => error.ProcessResources,
+                error.InodeMountFail => error.InodeMountFail,
+                error.Unexpected => unreachable,
+            };
+        return .{ .handle = fd };
     }
 
     pub fn close(self: Signalfd) void {
@@ -184,10 +219,43 @@ pub const Signalfd = struct {
 
     pub const ReadError = error{Incomplete} || posix.ReadError;
 
-    pub fn read(self: Signalfd) Siginfo {
+    pub fn read(self: Signalfd) ReadError!Siginfo {
         var info: Siginfo = undefined;
-        const bytes_read = try posix.read(self.handle, @as([*]u8, @ptrCast(@alignCast(&info)))[0..@sizeOf(Siginfo)]);
+        const bytes_read = try posix.read(
+            self.handle,
+            @as([*]u8, @ptrCast(@alignCast(&info)))[0..@sizeOf(Siginfo)],
+        );
         if (bytes_read != @sizeOf(Siginfo)) return error.Incomplete;
         return info;
+    }
+};
+
+pub const Poll = struct {
+    pub const Events = packed struct(u16) {
+        in: bool = false,
+        pri: bool = false,
+        out: bool = false,
+        err: bool = false,
+        hup: bool = false,
+        nval: bool = false,
+        rdnorm: bool = false,
+        rdband: bool = false,
+        wrnorm: bool = false,
+        wrband: bool = false,
+        msg: bool = false,
+        remove: bool = false,
+        _: u4 = 0,
+    };
+
+    pub const Pollfd = extern struct {
+        fd: Fd,
+        events: Events,
+        revents: Events = .{},
+    };
+
+    pub const Error = posix.PollError;
+
+    pub fn poll(pfds: []Pollfd, timeout: i32) Error!usize {
+        return try posix.poll(@ptrCast(pfds), timeout);
     }
 };
