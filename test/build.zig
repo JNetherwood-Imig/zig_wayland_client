@@ -22,6 +22,7 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
             .imports = &.{
                 .{ .name = "wayland_client", .module = wayland.module("client") },
+                .{ .name = "wayland_util", .module = wayland.module("util") },
             },
         }),
     });

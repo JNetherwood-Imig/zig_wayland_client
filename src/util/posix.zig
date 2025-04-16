@@ -1,14 +1,104 @@
 const std = @import("std");
+const system = std.os.linux;
 const io = @import("io.zig");
 
 pub const Errno = @import("posix/errno.zig").Errno;
 pub const File = @import("posix/File.zig");
 pub const Epoll = @import("posix/Epoll.zig");
+pub const Pipe = @import("posix/Pipe.zig");
+pub const Fd = File.Fd;
+
+// TODO better OpenOptions, ideally split into 3 or 4 function args
+// access_mode: File.AccessMode, ...
+pub const OpenOptions = packed struct(u32) {
+    access_mode: File.AccessMode = .read_only,
+    _2: u4 = 0,
+    create: bool = false,
+    exclusive: bool = false,
+    no_controlling_tty: bool = false,
+    truncate: bool = false,
+    append: bool = false,
+    nonblocking: bool = false,
+    data_synchronized_io: bool = false,
+    asynchronous_io: bool = false,
+    direct_io: bool = false,
+    _15: u1 = 0,
+    ensure_directory: bool = false,
+    no_follow_symlinks: bool = false,
+    no_access_time: bool = false,
+    close_on_exec: bool = false,
+    file_synchronized: bool = false,
+    path_only: bool = false,
+    create_temp: bool = false,
+    _: u9 = 0,
+};
+
+pub const OpenError = error{
+    AccessDenied,
+    FileExists,
+    FileNotFound,
+    PathTooLong,
+    SymLinkLoop,
+    IsDirectory,
+    InvalidArgument,
+    FilesystemBusy,
+    FilesystemFull,
+    ReadOnlyFilesystem,
+    TooManyOpenFiles,
+    BadDescriptor,
+    BadAddress,
+    FileTooLarge,
+    OutOfMemory,
+    UnsupportedOperation,
+    Interrupted,
+    WouldBlock,
+};
+
+pub fn open(
+    path: [:0]const u8,
+    options: OpenOptions,
+    mode: File.Mode,
+) OpenError!File {
+    const ret = system.open(
+        path,
+        @bitCast(options),
+        @intCast(@as(u32, @bitCast(mode))),
+    );
+    return switch (Errno.get(ret)) {
+        .success => .{ .handle = @intCast(ret) },
+        .interrupted_system_call => error.Interrupted,
+        .permission_denied => error.AccessDenied,
+        .operation_not_permitted => error.AccessDenied,
+        .file_exists => error.FileExists,
+        .no_such_file_or_directory => error.FileNotFound,
+        .no_such_device => error.FileNotFound,
+        .no_such_device_or_address => error.FileNotFound,
+        .file_name_too_long => error.PathTooLong,
+        .too_many_levels_of_symbolic_links => error.SymLinkLoop,
+        .is_a_directory => error.IsDirectory,
+        .invalid_argument => error.InvalidArgument,
+        .value_too_large_for_defined_data_type => error.InvalidArgument,
+        .device_or_resource_busy => error.FilesystemBusy,
+        .text_file_busy => error.FilesystemBusy,
+        .no_space_left_on_device => error.FilesystemFull,
+        .disk_quota_exceeded => error.FilesystemFull,
+        .read_only_file_system => error.ReadOnlyFilesystem,
+        .too_many_open_files => error.TooManyOpenFiles,
+        .too_many_open_files_in_system => error.TooManyOpenFiles,
+        .bad_file_descriptor => error.BadDescriptor,
+        .bad_address => error.BadAddress,
+        .file_too_large => error.FileTooLarge,
+        .cannot_allocate_memory => error.OutOfMemory,
+        .operation_not_supported => error.UnsupportedOperation,
+        .resource_temporarily_unavailable => error.WouldBlock,
+        else => unreachable,
+    };
+}
 
 test "file" {
     io.eprintln("Testing file functions...");
 
-    const fd = try File.open("/dev/dri/card1", .{}, .{});
+    const fd = try open("/dev/dri/card1", .{}, .{});
     defer fd.close();
 
     io.eprintlnf("GPU fd is {any}", .{fd});
@@ -20,28 +110,43 @@ test "file" {
     io.eprintlnf("New GPU fd flags are {any}", .{flags});
 }
 
-test "epoll" {}
+test "epoll" {
+    io.eprintln("Testing epoll...");
+    const fd = try open("/dev/dri/card1", .{}, .{});
+    defer fd.close();
 
-// pub const Pipe = struct {
-//     handle: [2]Fd,
+    const epoll = try Epoll.create(.{});
+    defer epoll.close();
 
-//     pub const CreateError = posix.PipeError;
-//     pub inline fn create() CreateError!Pipe {
-//         return .{ .handle = try posix.pipe() };
-//     }
+    try epoll.add(fd.handle, .{
+        .events = .{ .in = true },
+        .data = .{ .fd = fd.handle },
+    });
+    try epoll.mod(fd.handle, .{
+        .events = .{ .out = true },
+        .data = .{ .fd = fd.handle },
+    });
 
-//     pub inline fn close(self: Pipe) void {
-//         for (self.handle) |fd| posix.close(fd);
-//     }
+    var events = [1]Epoll.Event{undefined};
+    const count = try epoll.wait(&events, 10);
+    io.eprintlnf("Got {d} events", .{count});
 
-//     pub inline fn getReadFd(self: Pipe) Fd {
-//         return self.handle[0];
-//     }
+    try epoll.del(fd.handle);
+}
 
-//     pub inline fn getWriteFd(self: Pipe) Fd {
-//         return self.handle[1];
-//     }
-// };
+test "pipe" {
+    io.eprintln("Testing pipe...");
+    const pipe = try Pipe.create();
+    defer pipe.close();
+
+    const read = pipe.getReadFile();
+    const write = pipe.getWriteFile();
+
+    io.eprintlnf(
+        "Pipe read file is {any} and write file is {any}",
+        .{ read, write },
+    );
+}
 
 // pub const Sig = enum(u32) {
 //     hangup = SIG.HUP,
