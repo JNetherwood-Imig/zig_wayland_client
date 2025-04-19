@@ -16,6 +16,9 @@ pub fn build(b: *std.Build) void {
 
     const exe = b.addExecutable(.{
         .name = "test",
+        .use_llvm = false,
+        .use_lld = false,
+        .link_libc = false,
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/main.zig"),
             .target = target,
@@ -28,4 +31,8 @@ pub fn build(b: *std.Build) void {
     });
 
     b.installArtifact(exe);
+
+    const run_exe = b.addRunArtifact(exe);
+    const run_step = b.step("run", "Run the exe");
+    run_step.dependOn(&run_exe.step);
 }

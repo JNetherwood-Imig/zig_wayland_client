@@ -1,5 +1,9 @@
 gpa: Allocator,
 socket: Socket,
+event_queue: EventQueue,
+id_allocator: IdAllocator,
+event_thread: Thread,
+cancel_pipe: Pipe,
 
 pub const ConnectInfo = union(enum) {
     socket: i32,
@@ -15,36 +19,52 @@ pub fn getConnectInfo() ConnectInfo {
     return .{ .display = wayland_display orelse "wayland-0" };
 }
 
-pub const InitError = Allocator.Error || ConnectError;
+pub const InitError = Allocator.Error ||
+    ConnectError ||
+    EventQueue.InitError ||
+    Thread.SpawnError ||
+    Pipe.CreateError;
 
 pub fn init(gpa: Allocator, connect_info: anytype) InitError!*Self {
     const self = try gpa.create(Self);
 
     self.gpa = gpa;
     self.socket = try connectSocket(connect_info);
+    self.event_queue = try EventQueue.init();
+    self.id_allocator = IdAllocator.init(gpa);
+    self.cancel_pipe = try Pipe.create();
+    self.event_thread = try Thread.spawn(.{ .allocator = gpa }, pollEvents, .{self});
 
     return self;
 }
 
-pub fn terminate(self: *const Self) void {
-    _ = self;
+pub fn terminate(self: *Self) void {
+    self.cancel_pipe.writeAll("1") catch return;
+    self.event_queue.cancel();
 }
 
-pub fn deinit(self: *const Self) void {
+pub fn deinit(self: *Self) void {
     self.terminate();
+    self.event_thread.join();
+    self.cancel_pipe.close();
+    self.id_allocator.deinit();
+    self.event_queue.deinit();
     self.socket.close();
     self.gpa.destroy(self);
 }
 
-pub fn getNextEvent(self: *const Self) ?wl.Event {
-    _ = self;
-    return null;
+pub fn waitNextEvent(self: *Self) ?wl.Event {
+    return self.event_queue.waitEvent();
+}
+
+pub fn getNextEvent(self: *Self) ?wl.Event {
+    return self.event_queue.getEvent();
 }
 
 const ConnectError = error{
     NoXdgRuntimeDir,
     SocketPathTooLong,
-} || Socket.CreateError;
+} || Socket.CreateError || Socket.ConnectUnixError;
 
 fn connectSocket(connect_info: anytype) ConnectError!Socket {
     if (@TypeOf(connect_info) == Socket) return connect_info;
@@ -60,37 +80,66 @@ fn connectSocket(connect_info: anytype) ConnectError!Socket {
     };
     return switch (info) {
         .socket => |socket| Socket{ .handle = File{ .handle = socket } },
-        .display => |display| init: {
-            const sock = try Socket.create(
-                .unix,
-                .stream,
-                .{ .cloexec = true },
-                null,
-            );
-            // TODO make separate function
-            const xdg_runtime_dir = std.posix.getenv("XDG_RUNTIME_DIR") orelse
-                return error.NoXdgRuntimeDir;
-            var buf: [108]u8 = @splat(0);
-            const path = if (std.fs.path.isAbsolute(display))
-                display
-            else
-                std.fmt.bufPrint(
-                    &buf,
-                    "{s}/{s}",
-                    .{ xdg_runtime_dir, display },
-                ) catch
-                    return error.SocketPathTooLong;
-            try sock.connectUnix(path);
-            break :init sock;
+        .display => |display| try connectToDisplay(display),
+    };
+}
+
+fn connectToDisplay(display: []const u8) !Socket {
+    const socket = try Socket.create(.unix, .stream, .{ .cloexec = true }, null);
+    const xdg_runtime_dir = std.posix.getenv("XDG_RUNTIME_DIR") orelse
+        return error.NoXdgRuntimeDir;
+    var buf: [108]u8 = @splat(0);
+    const path = if (std.fs.path.isAbsolute(display))
+        display
+    else
+        std.fmt.bufPrint(&buf, "{s}/{s}", .{ xdg_runtime_dir, display }) catch
+            return error.SocketPathTooLong;
+    try socket.connectUnix(path);
+    return socket;
+}
+
+fn pollEvents(self: *Self) !void {
+    var pfds = [_]posix.Pollfd{
+        posix.Pollfd{
+            .fd = self.socket.handle,
+            .events = .{ .in = true },
+        },
+        posix.Pollfd{
+            .fd = self.cancel_pipe.getReadFile(),
+            .events = .{ .in = true },
         },
     };
+
+    while (true) {
+        _ = try posix.poll(&pfds, -1);
+        for (&pfds) |*pfd| {
+            if (@as(u16, @bitCast(pfd.revents)) != 0) {
+                pfd.revents = .{};
+                if (pfd.fd == self.cancel_pipe.getReadFile()) {
+                    var buf: [1]u8 = undefined;
+                    _ = try self.cancel_pipe.read(&buf);
+                    return;
+                }
+                if (pfd.fd == self.socket.handle) {
+                    // We have a server event!
+                    util.io.eprintln("Server event detected!");
+                    self.event_queue.emplaceEvent(.{ .registry_global = undefined });
+                }
+            }
+        }
+    }
 }
 
 const Self = @This();
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const posix = @import("util").posix;
+const Thread = std.Thread;
+const wl = @import("client_protocol");
+const EventQueue = @import("EventQueue.zig");
+const IdAllocator = @import("../common/IdAllocator.zig");
+const util = @import("util");
+const posix = util.posix;
 const Socket = posix.Socket;
 const File = posix.File;
-const wl = @import("client_protocol");
+const Pipe = posix.Pipe;
