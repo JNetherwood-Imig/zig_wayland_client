@@ -12,7 +12,10 @@ pub const CreateError = error{
 };
 
 pub fn create(flags: CreateFlags) CreateError!Self {
-    const ret = system.epoll_create1(@intCast(@as(u1, @bitCast(flags))));
+    const ret = system.epoll_create1(@intCast(@as(
+        @typeInfo(CreateFlags).@"struct".backing_integer.?,
+        @bitCast(flags),
+    )));
     return switch (Errno.get(ret)) {
         .success => .{ .handle = .{ .handle = @intCast(ret) } },
         .invalid_argument => error.InvalidFlags,
@@ -43,7 +46,7 @@ pub const Events = packed struct(u16) {
 
 pub const Data = extern union {
     ptr: usize,
-    fd: Fd,
+    fd: File,
     u32: u32,
     u64: u64,
 };
@@ -66,7 +69,7 @@ pub const AddError = error{
     EpollNotSupportedForFd,
 };
 
-pub fn add(self: Self, fd: Fd, event: Event) AddError!void {
+pub fn add(self: Self, fd: File, event: Event) AddError!void {
     const ret = self.ctl(.add, fd, event);
     return switch (Errno.get(ret)) {
         .success => {},
@@ -89,7 +92,7 @@ pub const ModError = error{
     EpollNotSupportedForFd,
 };
 
-pub fn mod(self: Self, fd: Fd, event: Event) ModError!void {
+pub fn mod(self: Self, fd: File, event: Event) ModError!void {
     const ret = self.ctl(.mod, fd, event);
     return switch (Errno.get(ret)) {
         .success => {},
@@ -110,7 +113,7 @@ pub const DelError = error{
     EpollNotSupportedForFd,
 };
 
-pub fn del(self: Self, fd: Fd) DelError!void {
+pub fn del(self: Self, fd: File) DelError!void {
     const ret = self.ctl(.del, fd, null);
     return switch (Errno.get(ret)) {
         .success => {},
@@ -126,13 +129,13 @@ pub fn del(self: Self, fd: Fd) DelError!void {
 fn ctl(
     self: Self,
     op: enum(u32) { add = 1, del, mod },
-    fd: Fd,
+    fd: File,
     event: ?Event,
 ) usize {
     return system.epoll_ctl(
         self.handle.handle,
         @intFromEnum(op),
-        fd,
+        fd.handle,
         @ptrCast(@constCast(&event)),
     );
 }
@@ -167,7 +170,6 @@ pub fn wait(
 const Self = @This();
 const std = @import("std");
 const system = std.os.linux;
-const File = @import("File.zig");
-const Fd = File.Fd;
+const File = @import("file.zig").File;
 const Errno = @import("errno.zig").Errno;
 const io = @import("../io.zig");

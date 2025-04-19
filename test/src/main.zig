@@ -1,12 +1,27 @@
+const builtin = @import("builtin");
 const std = @import("std");
 const wl = @import("wayland_client");
 const util = @import("wayland_util");
 const io = util.io;
 
+const gpa = struct {
+    var internal = std.heap.GeneralPurposeAllocator(.{}){};
+    pub const allocator = switch (builtin.mode) {
+        .ReleaseFast => std.heap.smp_allocator,
+        else => internal.allocator(),
+    };
+
+    pub fn deinit() void {
+        switch (builtin.mode) {
+            .ReleaseFast => {},
+            else => _ = internal.deinit(),
+        }
+    }
+};
+
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const alloc = gpa.allocator();
+    const alloc = gpa.allocator;
+    defer gpa.deinit();
 
     const disp = try wl.DisplayConnection.init(alloc, null);
     defer disp.deinit();

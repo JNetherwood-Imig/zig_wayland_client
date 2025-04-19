@@ -24,29 +24,37 @@ pub fn build(b: *std.Build) void {
         "A list of directories containing wayland protocol xml files.",
     );
 
-    const client_mod = b.addModule("client", .{
-        .root_source_file = b.path("src/client.zig"),
+    const util_mod = b.addModule("util", .{
+        .root_source_file = b.path("src/util.zig"),
         .target = target,
         .optimize = optimize,
     });
 
+    const client_mod = b.addModule("client", .{
+        .root_source_file = b.path("src/client.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{.{ .name = "util", .module = util_mod }},
+    });
+
     const client_protocol = generateClient(b, files, dirs, scanner);
-    client_mod.addAnonymousImport("client_protocol", .{ .root_source_file = client_protocol });
+    client_mod.addAnonymousImport(
+        "client_protocol",
+        .{ .root_source_file = client_protocol },
+    );
 
     const server_mod = b.addModule("server", .{
         .root_source_file = b.path("src/server.zig"),
         .target = target,
         .optimize = optimize,
+        .imports = &.{.{ .name = "util", .module = util_mod }},
     });
 
     const server_protocol = generateServer(b, files, dirs, scanner);
-    server_mod.addAnonymousImport("server_protocol", .{ .root_source_file = server_protocol });
-
-    _ = b.addModule("util", .{
-        .root_source_file = b.path("src/util.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
+    server_mod.addAnonymousImport(
+        "server_protocol",
+        .{ .root_source_file = server_protocol },
+    );
 }
 
 fn generateClient(

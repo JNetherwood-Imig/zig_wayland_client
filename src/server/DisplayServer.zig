@@ -1,20 +1,34 @@
-const std = @import("std");
-const Self = @This();
+gpa: Allocator,
+socket: posix.Socket,
 
-stream: std.net.Stream,
+pub const InitError = Allocator.Error;
 
-pub const Error = error{};
+pub fn init(gpa: Allocator, setup_info: anytype) InitError!*Self {
+    var self = try gpa.create(Self);
+    self.gpa = gpa;
 
-pub fn init(setup_info: anytype) Error!Self {
     switch (@typeInfo(@TypeOf(setup_info))) {
+        // posix.File
+        // i32,
+        // []u8,
+        // [_:0]u8
+        // null
         else => @compileError("Unsupported type"),
     }
 
-    return Self{
-        .stream = .{ .handle = -1 },
-    };
+    return self;
 }
 
-pub fn deinit(self: Self) void {
-    self.stream.close();
+pub fn deinit(self: *const Self) void {
+    // self.socket.close();
+    self.gpa.destroy(self);
 }
+
+pub fn getSocket(self: *const Self) posix.File {
+    return self.socket.handle;
+}
+
+const Self = @This();
+const std = @import("std");
+const Allocator = std.mem.Allocator;
+const posix = @import("util").posix;
