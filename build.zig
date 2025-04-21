@@ -24,7 +24,7 @@ pub fn build(b: *std.Build) void {
         "A list of directories containing wayland protocol xml files.",
     );
 
-    const util_mod = b.addModule("util", .{
+    _ = b.addModule("util", .{
         .root_source_file = b.path("src/util.zig"),
         .target = target,
         .optimize = optimize,
@@ -34,7 +34,6 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/client.zig"),
         .target = target,
         .optimize = optimize,
-        .imports = &.{.{ .name = "util", .module = util_mod }},
     });
 
     const client_protocol = generateClient(b, files, dirs, scanner);
@@ -47,7 +46,6 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/server.zig"),
         .target = target,
         .optimize = optimize,
-        .imports = &.{.{ .name = "util", .module = util_mod }},
     });
 
     const server_protocol = generateServer(b, files, dirs, scanner);
@@ -55,6 +53,20 @@ pub fn build(b: *std.Build) void {
         "server_protocol",
         .{ .root_source_file = server_protocol },
     );
+
+    const client_tests = b.addTest(.{
+        .root_module = client_mod,
+    });
+    const run_client_tests = b.addRunArtifact(client_tests);
+
+    const server_tests = b.addTest(.{
+        .root_module = server_mod,
+    });
+    const run_server_tests = b.addRunArtifact(server_tests);
+
+    const run_tests = b.step("test", "Run unit tests");
+    run_tests.dependOn(&run_client_tests.step);
+    run_tests.dependOn(&run_server_tests.step);
 }
 
 fn generateClient(

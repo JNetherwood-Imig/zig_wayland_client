@@ -14,20 +14,22 @@ pub fn build(b: *std.Build) void {
         .files = files,
     });
 
+    const exe_mod = b.createModule(.{
+        .root_source_file = b.path("src/main.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "wayland_client", .module = wayland.module("client") },
+            .{ .name = "wayland_util", .module = wayland.module("util") },
+        },
+    });
+
     const exe = b.addExecutable(.{
         .name = "test",
         .use_llvm = false,
         .use_lld = false,
         .link_libc = false,
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/main.zig"),
-            .target = target,
-            .optimize = optimize,
-            .imports = &.{
-                .{ .name = "wayland_client", .module = wayland.module("client") },
-                .{ .name = "wayland_util", .module = wayland.module("util") },
-            },
-        }),
+        .root_module = exe_mod,
     });
 
     b.installArtifact(exe);

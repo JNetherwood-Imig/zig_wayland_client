@@ -12,6 +12,8 @@ pub fn main() !void {
     io.eprintln("Initialized!");
     defer io.eprintln("Deinitializing...");
 
+    // try disp.socket.handle.toStdFile().writeAll(&.{ 1, 0, 0, 0, 1, 0, 12, 0, 2, 0, 0, 0 });
+
     while (disp.getNextEvent()) |ev| switch (ev) {
         .registry_global => io.eprintln("Recieved registry global"),
         .registry_global_remove => io.eprintln("Recieved registry global remove"),

@@ -1,26 +1,31 @@
-queue: Queue = Queue.init(),
-mutex: Thread.Mutex = .{},
-condition: Thread.Condition = .{}, // TODO rename appropriately
-cancelled: bool = false,
+queue: Queue,
+mutex: Thread.Mutex,
+condition: Thread.Condition,
+cancelled: bool,
 
 pub const InitError = error{};
 
-pub fn init() InitError!Self {
-    return .{};
+pub fn init() InitError!EventQueue {
+    return EventQueue{
+        .queue = Queue.init(),
+        .mutex = .{},
+        .condition = .{},
+        .cancelled = false,
+    };
 }
 
-pub fn deinit(self: Self) void {
+pub fn deinit(self: EventQueue) void {
     self.queue.deinit();
 }
 
-pub fn emplaceEvent(self: *Self, event: wl.Event) void {
+pub fn emplace(self: *EventQueue, event: wl.Event) void {
     self.mutex.lock();
     defer self.mutex.unlock();
     self.queue.writeItem(event) catch return;
     self.condition.signal();
 }
 
-pub fn waitEvent(self: *Self) ?wl.Event {
+pub fn wait(self: *EventQueue) ?wl.Event {
     self.mutex.lock();
     defer self.mutex.unlock();
 
@@ -30,7 +35,7 @@ pub fn waitEvent(self: *Self) ?wl.Event {
     return if (self.cancelled) null else self.queue.readItem();
 }
 
-pub fn getEvent(self: *Self) ?wl.Event {
+pub fn get(self: *EventQueue) ?wl.Event {
     if (self.mutex.tryLock()) {
         defer self.mutex.unlock();
         return self.queue.readItem();
@@ -38,14 +43,14 @@ pub fn getEvent(self: *Self) ?wl.Event {
     return null;
 }
 
-pub fn cancel(self: *Self) void {
+pub fn cancel(self: *EventQueue) void {
     self.mutex.lock();
     defer self.mutex.unlock();
     self.cancelled = true;
     self.condition.broadcast();
 }
 
-const Self = @This();
+const EventQueue = @This();
 
 const std = @import("std");
 const Thread = std.Thread;

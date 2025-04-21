@@ -1,13 +1,14 @@
 gpa: Allocator,
-next_client: Id = client_min_id,
-next_server: Id = server_min_id,
+next_client: Id,
+next_server: Id,
 client_free_list: FreeList,
 server_free_list: FreeList,
+mutex: Mutex,
 
-const client_min_id = 0x00000001;
-const client_max_id = 0xf0ffffff;
-const server_min_id = 0xff000000;
-const server_max_id = 0xffffffff;
+const client_min_id = 0x00000002;
+const client_max_id = 0xFEFFFFFF;
+const server_min_id = 0xFF000000;
+const server_max_id = 0xFFFFFFFF;
 
 pub const Id = u32;
 
@@ -16,56 +17,105 @@ pub const Side = enum(u1) {
     server,
 };
 
-pub fn init(gpa: std.mem.Allocator) Self {
+pub fn init(gpa: Allocator) IdAllocator {
     return .{
         .gpa = gpa,
-        .client_free_list = FreeList.init(gpa),
-        .server_free_list = FreeList.init(gpa),
+        .next_client = client_min_id,
+        .next_server = server_min_id,
+        .client_free_list = FreeList.init(gpa, {}),
+        .server_free_list = FreeList.init(gpa, {}),
+        .mutex = .{},
     };
 }
 
-pub fn deinit(self: Self) void {
+pub fn deinit(self: IdAllocator) void {
     self.client_free_list.deinit();
     self.server_free_list.deinit();
 }
 
-pub fn getNext(self: *Self, side: Side) Id {
-    switch (side) {
-        .client => {
-            if (self.client_free_list.items.len > 0) {
-                return self.client_free_list.pop().?;
-            }
+pub const AllocateError = error{
+    ClientIdsExhausted,
+    ServerIdsExhausted,
+};
+
+pub fn allocate(self: *IdAllocator, side: Side) AllocateError!Id {
+    self.mutex.lock();
+    defer self.mutex.unlock();
+
+    return switch (side) {
+        .client => self.client_free_list.removeOrNull() orelse id: {
+            if (self.next_client + 1 > client_max_id)
+                return error.ClientIdsExhausted;
             defer self.next_client += 1;
-            return self.next_client;
+            break :id self.next_client;
         },
-        .server => {
-            if (self.server_free_list.items.len > 0) {
-                return self.server_free_list.pop().?;
-            }
+        .server => self.server_free_list.removeOrNull() orelse id: {
+            if (self.next_server + 1 > server_max_id)
+                return error.ServerIdsExhausted;
             defer self.next_server += 1;
-            return self.next_server;
+            break :id self.next_server;
         },
-    }
+    };
+}
+
+test "allocate" {
+    var alloc = IdAllocator.init(std.testing.allocator);
+    defer alloc.deinit();
+
+    const client = try alloc.allocate(.client);
+    const client2 = try alloc.allocate(.client);
+    const server = try alloc.allocate(.server);
+
+    try testing.expectEqual(@as(Id, 2), client);
+    try testing.expectEqual(@as(Id, 3), client2);
+    try testing.expectEqual(@as(Id, server_min_id), server);
 }
 
 pub const ReplaceError = Allocator.Error;
 
-pub fn replace(self: *Self, id: u32) ReplaceError!void {
+pub fn replace(self: *IdAllocator, id: Id) ReplaceError!void {
+    self.mutex.lock();
+    defer self.mutex.unlock();
     if (id == self.next_client - 1) {
         self.next_client = id;
     } else if (id == self.next_server - 1) {
         self.next_server = id;
     } else if (id <= client_max_id) {
-        try self.client_free_list.append(id);
-        std.mem.sort(u32, self.client_free_list.items, {}, comptime std.sort.desc(u32));
+        try self.client_free_list.add(id);
     } else {
-        try self.server_free_list.append(id);
-        std.mem.sort(u32, self.server_free_list.items, {}, comptime std.sort.desc(u32));
+        try self.server_free_list.add(id);
     }
 }
 
-const Self = @This();
+test "replace" {
+    var alloc = IdAllocator.init(std.testing.allocator);
+    defer alloc.deinit();
+
+    const client2 = try alloc.allocate(.client);
+    const client3 = try alloc.allocate(.client);
+
+    try testing.expectEqual(@as(Id, 2), client2);
+    try testing.expectEqual(@as(Id, 3), client3);
+
+    try alloc.replace(client3);
+    const client4 = try alloc.allocate(.client);
+
+    try testing.expectEqual(@as(Id, 3), client4);
+
+    try alloc.replace(client2);
+    const client5 = try alloc.allocate(.client);
+
+    try testing.expectEqual(@as(Id, 2), client5);
+}
+
+const IdAllocator = @This();
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const FreeList = std.ArrayList(Id);
+const FreeList = std.PriorityQueue(Id, void, struct {
+    pub fn lessThan(_: void, a: Id, b: Id) std.math.Order {
+        return std.math.order(a, b);
+    }
+}.lessThan);
+const Mutex = std.Thread.Mutex;
+const testing = std.testing;

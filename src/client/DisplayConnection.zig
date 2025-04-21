@@ -4,6 +4,7 @@ event_queue: EventQueue,
 id_allocator: IdAllocator,
 event_thread: Thread,
 cancel_pipe: Pipe,
+proxy: if (@hasDecl(wl, "Display")) wl.Display else void,
 
 pub const ConnectInfo = union(enum) {
     socket: i32,
@@ -25,8 +26,8 @@ pub const InitError = Allocator.Error ||
     Thread.SpawnError ||
     Pipe.CreateError;
 
-pub fn init(gpa: Allocator, connect_info: anytype) InitError!*Self {
-    const self = try gpa.create(Self);
+pub fn init(gpa: Allocator, connect_info: anytype) InitError!*DisplayConnection {
+    const self = try gpa.create(DisplayConnection);
 
     self.gpa = gpa;
     self.socket = try connectSocket(connect_info);
@@ -34,16 +35,24 @@ pub fn init(gpa: Allocator, connect_info: anytype) InitError!*Self {
     self.id_allocator = IdAllocator.init(gpa);
     self.cancel_pipe = try Pipe.create();
     self.event_thread = try Thread.spawn(.{ .allocator = gpa }, pollEvents, .{self});
+    // self.proxy = wl.Display{
+    //     .proxy = Proxy{
+    //         .id = 1,
+    //         .event0_index = 0,
+    //         .socket = self.socket,
+    //         .id_allocator = &self.id_allocator,
+    //     },
+    // };
 
     return self;
 }
 
-pub fn terminate(self: *Self) void {
+pub fn terminate(self: *DisplayConnection) void {
     self.cancel_pipe.writeAll("1") catch return;
     self.event_queue.cancel();
 }
 
-pub fn deinit(self: *Self) void {
+pub fn deinit(self: *DisplayConnection) void {
     self.terminate();
     self.event_thread.join();
     self.cancel_pipe.close();
@@ -53,12 +62,12 @@ pub fn deinit(self: *Self) void {
     self.gpa.destroy(self);
 }
 
-pub fn waitNextEvent(self: *Self) ?wl.Event {
-    return self.event_queue.waitEvent();
+pub fn waitNextEvent(self: *DisplayConnection) ?wl.Event {
+    return self.event_queue.wait();
 }
 
-pub fn getNextEvent(self: *Self) ?wl.Event {
-    return self.event_queue.getEvent();
+pub fn getNextEvent(self: *DisplayConnection) ?wl.Event {
+    return self.event_queue.get();
 }
 
 const ConnectError = error{
@@ -98,7 +107,7 @@ fn connectToDisplay(display: []const u8) !Socket {
     return socket;
 }
 
-fn pollEvents(self: *Self) !void {
+fn pollEvents(self: *DisplayConnection) !void {
     var pfds = [_]posix.Pollfd{
         posix.Pollfd{
             .fd = self.socket.handle,
@@ -121,16 +130,26 @@ fn pollEvents(self: *Self) !void {
                     return;
                 }
                 if (pfd.fd == self.socket.handle) {
-                    // We have a server event!
-                    util.io.eprintln("Server event detected!");
-                    self.event_queue.emplaceEvent(.{ .registry_global = undefined });
+                    var head: Header = undefined;
+                    _ = try self.socket.handle.toStdFile().read(@as([*]u8, @ptrCast(@alignCast(&head)))[0..@sizeOf(Header)]);
+                    std.debug.print("Server event detected: {any}", .{head});
+                    const buf = try self.gpa.alloc(u8, head.length - @sizeOf(Header));
+                    defer self.gpa.free(buf);
+                    _ = try self.socket.handle.toStdFile().read(buf);
+                    if (head.object == 2 and head.opcode == 0)
+                        self.event_queue.emplace(.{ .registry_global = undefined });
                 }
             }
         }
     }
 }
 
-const Self = @This();
+const Header = packed struct(u64) {
+    object: u32,
+    opcode: u16,
+    length: u16,
+};
+const DisplayConnection = @This();
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
@@ -138,8 +157,8 @@ const Thread = std.Thread;
 const wl = @import("client_protocol");
 const EventQueue = @import("EventQueue.zig");
 const IdAllocator = @import("../common/IdAllocator.zig");
-const util = @import("util");
-const posix = util.posix;
+const posix = @import("../util/posix.zig");
 const Socket = posix.Socket;
 const File = posix.File;
 const Pipe = posix.Pipe;
+const Proxy = @import("Proxy.zig");

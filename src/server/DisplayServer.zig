@@ -31,4 +31,4 @@ pub fn getSocket(self: *const Self) posix.File {
 const Self = @This();
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const posix = @import("util").posix;
+const posix = @import("../util/posix.zig");
