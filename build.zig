@@ -24,7 +24,13 @@ pub fn build(b: *std.Build) void {
         "A list of directories containing wayland protocol xml files.",
     );
 
-    _ = b.addModule("util", .{
+    const core_path = b.option(
+        LazyPath,
+        "wayland_xml_path",
+        "Optional override path to the core wayland.xml file",
+    );
+
+    const util_mod = b.addModule("util", .{
         .root_source_file = b.path("src/util.zig"),
         .target = target,
         .optimize = optimize,
@@ -34,9 +40,10 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/client.zig"),
         .target = target,
         .optimize = optimize,
+        .imports = &.{.{ .name = "util", .module = util_mod }},
     });
 
-    const client_protocol = generateClient(b, files, dirs, scanner);
+    const client_protocol = generateClient(b, core_path, files, dirs, scanner);
     client_mod.addAnonymousImport(
         "client_protocol",
         .{ .root_source_file = client_protocol },
@@ -46,9 +53,10 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/server.zig"),
         .target = target,
         .optimize = optimize,
+        .imports = &.{.{ .name = "util", .module = util_mod }},
     });
 
-    const server_protocol = generateServer(b, files, dirs, scanner);
+    const server_protocol = generateServer(b, core_path, files, dirs, scanner);
     server_mod.addAnonymousImport(
         "server_protocol",
         .{ .root_source_file = server_protocol },
@@ -71,6 +79,7 @@ pub fn build(b: *std.Build) void {
 
 fn generateClient(
     b: *std.Build,
+    core_path: ?LazyPath,
     files: ?[]const LazyPath,
     dirs: ?[]const LazyPath,
     scanner: *std.Build.Step.Compile,
@@ -82,6 +91,7 @@ fn generateClient(
     run_scanner.addArg("client");
     const generated = run_scanner.addPrefixedOutputFileArg("-o", "generated.zig");
 
+    if (core_path) |path| run_scanner.addPrefixedFileArg("-c", path);
     if (files) |f| for (f) |file| {
         run_scanner.addPrefixedFileArg("-f", file);
     };
@@ -99,6 +109,7 @@ fn generateClient(
 
 fn generateServer(
     b: *std.Build,
+    core_path: ?LazyPath,
     files: ?[]const LazyPath,
     dirs: ?[]const LazyPath,
     scanner: *std.Build.Step.Compile,
@@ -110,6 +121,7 @@ fn generateServer(
     run_scanner.addArg("server");
     const generated = run_scanner.addPrefixedOutputFileArg("-o", "generated.zig");
 
+    if (core_path) |path| run_scanner.addPrefixedFileArg("-c", path);
     if (files) |f| for (f) |file| {
         run_scanner.addPrefixedFileArg("-f", file);
     };

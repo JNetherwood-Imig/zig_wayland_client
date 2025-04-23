@@ -20,6 +20,7 @@ pub fn main() !void {
     var ctx = Context.init(allocator, mode);
     defer ctx.deinit();
 
+    var provided_core_path: ?[]const u8 = null;
     for (args[2..]) |arg| {
         if (std.mem.startsWith(u8, arg, "-o")) {
             if (ctx.out_file != null) {
@@ -28,6 +29,10 @@ pub fn main() !void {
             }
             ctx.out_file = try std.fs.cwd().createFile(arg[2..], .{});
             ctx.writer = ctx.out_file.?.writer();
+            continue;
+        }
+        if (std.mem.startsWith(u8, arg, "-c")) {
+            provided_core_path = arg[2..];
             continue;
         }
         if (std.mem.startsWith(u8, arg, "-f")) {
@@ -54,6 +59,13 @@ pub fn main() !void {
         // TODO print usage (goes with invalid args/usage above)
         std.log.err("Unrecognized argument \"{s}\"", .{arg});
         return error.InvalidArguments;
+    }
+
+    if (provided_core_path) |path| {
+        try ctx.addFile(try std.fs.cwd().openFile(path, .{}));
+    } else {
+        const path = "/usr/share/wayland/wayland.xml";
+        try ctx.addFile(try std.fs.openFileAbsolute(path, .{}));
     }
 
     try ctx.writeProtocols();

@@ -95,10 +95,9 @@ pub const ConnectUnixError = error{
     InProgress,
     AlreadyConnected,
     NotASocket,
-    InvalidAddress,
     AddressNotAvailable,
     TimedOut,
-    AddressFault,
+    BadAddress,
 };
 
 pub fn connectUnix(self: Self, path: []const u8) ConnectUnixError!void {
@@ -113,11 +112,10 @@ pub fn connectUnix(self: Self, path: []const u8) ConnectUnixError!void {
         .operation_now_in_progress, .operation_already_in_progress => error.InProgress,
         .transport_endpoint_already_connected => error.AlreadyConnected,
         .no_such_file_or_directory => error.FileNotFound,
-        // Not sock
-        // Invalid address
-        // Address not available
-        // timed out
-        // address fault
+        .socket_operation_on_non_socket => error.NotASocket,
+        .cannot_assign_requested_address => error.AddressNotAvailable,
+        .connection_timed_out => error.TimedOut,
+        .bad_address => error.BadAddress,
         else => unreachable,
     };
 }

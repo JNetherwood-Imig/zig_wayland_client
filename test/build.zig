@@ -4,14 +4,8 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const files: []const std.Build.LazyPath = &.{
-        b.path("wayland.xml"),
-        b.path("xdg-shell.xml"),
-        b.path("linux-drm-syncobj-v1.xml"),
-    };
-
     const wayland = b.dependency("wayland", .{
-        .files = files,
+        .dirs = @as([]const std.Build.LazyPath, &.{b.path("protocols/")}),
     });
 
     const exe_mod = b.createModule(.{

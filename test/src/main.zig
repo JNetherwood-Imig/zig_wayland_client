@@ -1,22 +1,15 @@
+const std = @import("std");
 const wl = @import("wayland_client");
-const util = @import("wayland_util");
-const io = util.io;
-const gpa = util.gpa;
 
 pub fn main() !void {
-    defer gpa.deinit();
-
-    const disp = try wl.DisplayConnection.init(gpa.allocator, null);
+    const disp = try wl.DisplayConnection.init(std.heap.page_allocator, {});
     defer disp.deinit();
 
-    io.eprintln("Initialized!");
-    defer io.eprintln("Deinitializing...");
+    std.debug.print("OK\n", .{});
 
-    // try disp.socket.handle.toStdFile().writeAll(&.{ 1, 0, 0, 0, 1, 0, 12, 0, 2, 0, 0, 0 });
-
-    while (disp.getNextEvent()) |ev| switch (ev) {
-        .registry_global => io.eprintln("Recieved registry global"),
-        .registry_global_remove => io.eprintln("Recieved registry global remove"),
+    while (disp.waitNextEvent()) |ev| switch (ev) {
+        .registry_global => std.debug.print("Recieved registry global\n", .{}),
+        .registry_global_remove => std.debug.print("Recieved registry global remove\n", .{}),
         else => {},
     };
 }
