@@ -4,4 +4,5 @@ pub const Fixed = @import("common/Fixed.zig");
 
 test {
     @import("std").testing.refAllDecls(@This());
+    _ = @import("client/Proxy.zig");
 }
