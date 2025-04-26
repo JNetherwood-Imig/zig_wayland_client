@@ -2,14 +2,21 @@ const std = @import("std");
 const wl = @import("wayland_client");
 
 pub fn main() !void {
-    const disp = try wl.DisplayConnection.init(std.heap.page_allocator, {});
-    defer disp.deinit();
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const alloc = gpa.allocator();
 
-    std.debug.print("OK\n", .{});
+    const disp = try wl.DisplayConnection.init(alloc, {});
+    defer disp.deinit();
+    const reg = try disp.getRegistry();
+    _ = reg;
 
     while (disp.waitNextEvent()) |ev| switch (ev) {
-        .registry_global => std.debug.print("Recieved registry global\n", .{}),
+        .registry_global => |g| {
+            std.debug.print("{d}: {s} ({d})\n", .{ g.name, g.interface, g.version });
+            disp.gpa.free(g.interface);
+        },
         .registry_global_remove => std.debug.print("Recieved registry global remove\n", .{}),
-        else => {},
+        else => |event| std.debug.panic("Unexpected wl event recieved: {s}\n", .{@tagName(event)}),
     };
 }

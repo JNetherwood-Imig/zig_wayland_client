@@ -109,10 +109,11 @@ fn printDestructorArgs(self: Self, writer: std.fs.File.Writer) !void {
         try arg.write(writer);
     }
     try writer.print("\t) void {{\n", .{});
-    try writer.print("\t\t_ = self;\n", .{});
+    try writer.print("\t\tself.proxy.marshalDestroyArgs({d}, {d}, .{{\n", .{ self.fd_count, self.opcode });
     for (self.args.items) |arg| {
-        try writer.print("\t\t_ = {s};\n", .{arg.final_name orelse arg.name});
+        try writer.print("\t\t\t{s},\n", .{arg.final_name orelse arg.name});
     }
+    try writer.print("\t\t}});\n", .{});
 }
 
 fn printConstructorArgs(self: Self, writer: std.fs.File.Writer) !void {
@@ -133,19 +134,27 @@ fn printConstructorArgs(self: Self, writer: std.fs.File.Writer) !void {
 
     try writer.print("\t) !{s} {{\n", .{return_type});
 
-    try writer.print("\t\t_ = self;\n", .{});
+    try writer.print("\t\tconst new_id = try self.proxy.id_allocator.allocate(.client);\n", .{});
+    try writer.print(
+        "\t\treturn self.proxy.marshalCreateArgs({s}, {d}, new_id, {d}, .{{\n",
+        .{ return_type, self.fd_count, self.opcode },
+    );
     for (self.args.items) |arg| {
         if (arg.enumerated_type == .new_id) {
-            if (arg.interface == null) {
-                try writer.print("\t\t_ = version;\n", .{});
+            if (arg.interface_type == null) {
+                try writer.print("\t\t\tGenericNewId{{\n", .{});
+                try writer.print("\t\t\t\t.interface = Interface.interface,\n", .{});
+                try writer.print("\t\t\t\t.version = version,\n", .{});
+                try writer.print("\t\t\t\t.id = new_id,\n", .{});
+                try writer.print("\t\t\t}},\n", .{});
+            } else {
+                try writer.print("\t\t\tnew_id,\n", .{});
             }
             continue;
         }
-
-        try writer.print("\t\t_ = {s};\n", .{arg.final_name orelse arg.name});
+        try writer.print("\t\t\t{s},\n", .{arg.final_name orelse arg.name});
     }
-    try writer.print("\t\tconst ret: {s} = undefined;\n", .{return_type});
-    try writer.print("\t\treturn ret;\n", .{});
+    try writer.print("\t\t}});\n", .{});
 }
 
 fn printNormalArgs(self: Self, writer: std.fs.File.Writer) !void {
@@ -155,7 +164,7 @@ fn printNormalArgs(self: Self, writer: std.fs.File.Writer) !void {
     try writer.print("\t) !void {{\n", .{});
     try writer.print("\t\ttry self.proxy.marshalArgs({d}, {d}, .{{\n", .{ self.fd_count, self.opcode });
     for (self.args.items) |arg| {
-        try writer.print("\t\t\t{s},", .{arg.final_name orelse arg.name});
+        try writer.print("\t\t\t{s},\n", .{arg.final_name orelse arg.name});
     }
-    try writer.print("\t}} );\n", .{});
+    try writer.print("\t\t}});\n", .{});
 }

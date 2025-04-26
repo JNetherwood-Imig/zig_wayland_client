@@ -71,6 +71,14 @@ pub fn getNextEvent(self: *DisplayConnection) ?wl.Event {
     return self.event_queue.get();
 }
 
+pub fn sync(self: DisplayConnection) !wl.Callback {
+    return self.proxy.sync();
+}
+
+pub fn getRegistry(self: DisplayConnection) !wl.Registry {
+    return self.proxy.getRegistry();
+}
+
 const ConnectError = error{
     InvalidSocketFd,
     NoXdgRuntimeDir,
@@ -168,8 +176,18 @@ fn parseEvent(self: *DisplayConnection) !void {
     _ = try self.socket.handle.read(buf);
 
     // TEMP
-    if (head.object == 2 and head.opcode == 0)
-        self.event_queue.emplace(.{ .registry_global = undefined });
+    if (head.object == 2 and head.opcode == 0) {
+        const name = std.mem.bytesToValue(u32, buf[0..4]);
+        const interface_len = std.mem.bytesToValue(u32, buf[4..8]);
+        const interface = buf[8 .. interface_len + 7];
+        const version = std.mem.bytesToValue(u32, buf[buf.len - 4 ..]);
+        self.event_queue.emplace(.{ .registry_global = .{
+            .self = undefined,
+            .name = name,
+            .interface = try self.gpa.dupe(u8, interface),
+            .version = version,
+        } });
+    }
 }
 
 const DisplayConnection = @This();

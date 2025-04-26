@@ -136,6 +136,9 @@ pub fn write(self: Self, deps: []const DependencyInfo) !void {
     try self.printDescription(writer);
 
     try writer.print("const std = @import(\"std\");\n", .{});
+    try writer.print("const common = @import(\"common\");\n", .{});
+    try writer.print("const Proxy = common.Proxy;\n", .{});
+    try writer.print("const GenericNewId = Proxy.GenericNewId;\n", .{});
 
     for (self.dependencies.items) |dep| {
         var found = false;

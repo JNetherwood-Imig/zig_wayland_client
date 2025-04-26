@@ -193,7 +193,7 @@ pub const File = packed struct(i32) {
             .INVAL => error.InvalidArgument,
             .IO => error.IOError,
             .ISDIR => error.IsADirectory,
-            else => unreachable,
+            else => |err| std.debug.panic("READ ERROR: {s}\n", .{@tagName(err)}),
         };
     }
 
@@ -335,15 +335,16 @@ pub const File = packed struct(i32) {
         flags: MessageFlags,
     ) SendMessageError!usize {
         const iov = std.posix.iovec_const{ .base = bytes.ptr, .len = bytes.len };
-        var cmsg_buf = [_]u8{0} ** (@sizeOf(CmsgHdr) + @sizeOf(T));
-        serializeCmsg(&cmsg_buf, T, control_data, cmsg_type);
+        const cmsg_len = @sizeOf(CmsgHdr) + @sizeOf(T);
+        var cmsg_buf = [_]u8{0} ** cmsg_len;
+        if (@sizeOf(T) > 0) serializeCmsg(&cmsg_buf, T, control_data, cmsg_type);
         const msg = system.msghdr_const{
             .name = null,
             .namelen = 0,
             .iov = @ptrCast(&iov),
             .iovlen = 1,
-            .control = &cmsg_buf,
-            .controllen = cmsg_buf.len,
+            .control = if (@sizeOf(T) > 0) &cmsg_buf else null,
+            .controllen = if (@sizeOf(T) > 0) cmsg_len else 0,
             .flags = 0,
         };
 

@@ -4,6 +4,12 @@ socket: os.File,
 id_allocator: *IdAllocator,
 gpa: Allocator,
 
+pub const GenericNewId = struct {
+    interface: String,
+    version: u32,
+    id: u32,
+};
+
 pub const MarshalCreateArgsError = error{};
 
 pub fn marshalCreateArgs(
@@ -14,7 +20,7 @@ pub fn marshalCreateArgs(
     opcode: u32,
     args: anytype,
 ) !T {
-    try self.marshalArgsEx(fd_count, opcode, args);
+    try self.marshalArgs(fd_count, opcode, args);
     return T{
         .proxy = Proxy{
             .socket = self.socket,
@@ -43,42 +49,10 @@ pub fn marshalArgs(self: Proxy, comptime fd_count: usize, opcode: u32, args: any
     };
     @as(*Header, @ptrCast(@alignCast(&buf[0]))).* = head;
 
-    serializeArgs(buf, &fds, args);
+    serializeArgs(buf[@sizeOf(Header)..], &fds, args);
 
     const sent = try self.socket.sendMessage([fd_count]os.File, fds, .rights, buf, .{});
     if (sent < buf.len) try self.socket.writeAll(buf[sent..]);
-}
-
-test "marshalArgs" {
-    var fds: [2]i32 = undefined;
-    _ = std.os.linux.socketpair(std.os.linux.AF.UNIX, std.os.linux.SOCK.STREAM, 0, &fds);
-
-    const disp = os.File{ .handle = fds[0] };
-    const client = os.File{ .handle = fds[1] };
-    var id_alloc = IdAllocator.init(std.testing.allocator);
-
-    const proxy = Proxy{
-        .id = 1,
-        .event0_index = 0,
-        .socket = client,
-        .id_allocator = &id_alloc,
-        .gpa = std.testing.allocator,
-    };
-
-    const fd1 = try os.File.open("/dev/dri/card1", .{}, .{});
-    defer fd1.close();
-    const fd2 = try os.File.open("/home/jackson/.config/hypr/hyprland.conf", .{}, .{});
-    defer fd2.close();
-
-    try proxy.marshalArgs(2, 1, .{ fd1, fd2 });
-
-    var fds_buf = [_]os.File{.{ .handle = 0 }} ** 2;
-    var buf: [8]u8 = undefined;
-    _ = try disp.recieveMessage([2]os.File, &fds_buf, &buf, 0);
-
-    try std.testing.expect(fds_buf[0].isValid() and fds_buf[1].isValid());
-    fds_buf[0].close();
-    fds_buf[1].close();
 }
 
 fn calculateArgsLen(args: anytype) usize {
@@ -259,12 +233,6 @@ const Header = packed struct {
     object: u32,
     opcode: u16,
     length: u16,
-};
-
-const GenericNewId = struct {
-    interface: String,
-    version: u32,
-    id: u32,
 };
 
 const String = [:0]const u8;
