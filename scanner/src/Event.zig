@@ -15,6 +15,7 @@ args: std.ArrayList(Arg),
 type_name: []const u8,
 numeric_since: ?u32 = null,
 numeric_deprecated_since: ?u32 = null,
+fd_count: usize = 0,
 allocator: std.mem.Allocator,
 interface: Interface,
 
@@ -56,7 +57,9 @@ pub fn init(allocator: std.mem.Allocator, parser: *Parser, interface: Interface)
             continue;
         }
         if (std.mem.eql(u8, elem, "arg")) {
-            try self.args.append(try Arg.init(self.allocator, parser));
+            const arg = try Arg.init(self.allocator, parser);
+            if (arg.enumerated_type == .fd) self.fd_count += 1;
+            try self.args.append(arg);
             continue;
         }
 

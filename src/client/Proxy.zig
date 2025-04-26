@@ -1,28 +1,84 @@
 id: u32,
 event0_index: usize,
-socket: posix.Socket,
+socket: os.File,
 id_allocator: *IdAllocator,
 gpa: Allocator,
 
 pub const MarshalCreateArgsError = error{};
 
-pub fn marshalCreateArgs(self: Proxy, comptime T: type, new_id: u32, opcode: u32, args: anytype) !T {
-    try self.marshalArgs(opcode, args);
+pub fn marshalCreateArgs(
+    self: Proxy,
+    comptime T: type,
+    comptime fd_count: usize,
+    new_id: u32,
+    opcode: u32,
+    args: anytype,
+) !T {
+    try self.marshalArgsEx(fd_count, opcode, args);
     return T{
         .proxy = Proxy{
+            .socket = self.socket,
+            .event0_index = T.event0_index,
             .id = new_id,
+            .id_allocator = self.id_allocator,
+            .gpa = self.gpa,
         },
     };
 }
 
-pub fn marshalDestroyArgs(self: Proxy, opcode: u32, args: anytype) void {
-    self.marshalArgs(opcode, args) catch {};
+pub fn marshalDestroyArgs(self: Proxy, comptime fd_count: usize, opcode: u32, args: anytype) void {
+    self.marshalArgs(fd_count, opcode, args) catch {};
 }
 
-pub fn marshalArgs(self: Proxy, opcode: u32, args: anytype) !void {
-    _ = self;
-    _ = opcode;
-    _ = args;
+pub fn marshalArgs(self: Proxy, comptime fd_count: usize, opcode: u32, args: anytype) !void {
+    var fds: [fd_count]os.File = undefined;
+    const len = calculateArgsLen(args) + @sizeOf(Header);
+    const buf = try self.gpa.alloc(u8, len);
+    defer self.gpa.free(buf);
+
+    const head = Header{
+        .object = self.id,
+        .opcode = @intCast(opcode),
+        .length = @intCast(len),
+    };
+    @as(*Header, @ptrCast(@alignCast(&buf[0]))).* = head;
+
+    serializeArgs(buf, &fds, args);
+
+    const sent = try self.socket.sendMessage([fd_count]os.File, fds, .rights, buf, .{});
+    if (sent < buf.len) try self.socket.writeAll(buf[sent..]);
+}
+
+test "marshalArgs" {
+    var fds: [2]i32 = undefined;
+    _ = std.os.linux.socketpair(std.os.linux.AF.UNIX, std.os.linux.SOCK.STREAM, 0, &fds);
+
+    const disp = os.File{ .handle = fds[0] };
+    const client = os.File{ .handle = fds[1] };
+    var id_alloc = IdAllocator.init(std.testing.allocator);
+
+    const proxy = Proxy{
+        .id = 1,
+        .event0_index = 0,
+        .socket = .{ .handle = client },
+        .id_allocator = &id_alloc,
+        .gpa = std.testing.allocator,
+    };
+
+    const fd1 = try os.File.open("/dev/dri/card1", .{}, .{});
+    defer fd1.close();
+    const fd2 = try os.File.open("/home/jackson/.config/hypr/hyprland.conf", .{}, .{});
+    defer fd2.close();
+
+    try proxy.marshalArgs(2, 1, .{ fd1, fd2 });
+
+    var fds_buf = [_]os.File{.{ .handle = 0 }} ** 2;
+    var buf: [8]u8 = undefined;
+    _ = try disp.recieveMessage([2]os.File, &fds_buf, &buf, 0);
+
+    try std.testing.expect(fds_buf[0].isValid() and fds_buf[1].isValid());
+    fds_buf[0].close();
+    fds_buf[1].close();
 }
 
 fn calculateArgsLen(args: anytype) usize {
@@ -34,7 +90,7 @@ fn calculateArgsLen(args: anytype) usize {
             String => 4 + roundup4(field.len + 1),
             GenericNewId => 12 + roundup4(field.interface.len + 1),
             Array => 4 + roundup4(field.len),
-            Fd => @compileError("Fd marshaling not yet implemented"),
+            os.File => 0,
             else => unreachable,
         };
     }
@@ -94,7 +150,8 @@ fn serializeString(buf: []u8, string: String) []u8 {
 
 test "serializeString" {
     const str: [:0]const u8 = "Hello, world!";
-    const expected = [_]u8{ 14, 0, 0, 0, 'H', 'e', 'l', 'l', 'o', ',', ' ', 'w', 'o', 'r', 'l', 'd', '!', 0, 0, 0 };
+    const expected = [_]u8{ 14, 0, 0, 0 } ++
+        [_]u8{ 'H', 'e', 'l', 'l', 'o', ',', ' ', 'w', 'o', 'r', 'l', 'd', '!', 0, 0, 0 };
     var buf = [_]u8{0} ** 20;
     _ = serializeString(&buf, str);
     try std.testing.expectEqual(expected, buf);
@@ -112,7 +169,9 @@ test "serializeNewId" {
         .version = 6,
         .id = 3,
     };
-    const expected = [_]u8{ 14, 0, 0, 0, 'w', 'l', '_', 'c', 'o', 'm', 'p', 'o', 's', 'i', 't', 'o', 'r', 0, 0, 0, 6, 0, 0, 0, 3, 0, 0, 0 };
+    const expected = [_]u8{ 14, 0, 0, 0 } ++
+        [_]u8{ 'w', 'l', '_', 'c', 'o', 'm', 'p', 'o', 's', 'i', 't', 'o', 'r', 0, 0, 0 } ++
+        [_]u8{ 6, 0, 0, 0, 3, 0, 0, 0 };
     var buf = [_]u8{0} ** 28;
     _ = serializeNewId(&buf, new_id);
     try std.testing.expectEqual(expected, buf);
@@ -135,8 +194,14 @@ test "serializeArray" {
     try std.testing.expectEqual(buf, expected);
 }
 
-fn serializeArgs(buf: []u8, args: anytype) void {
+fn serializeFd(fds: []os.File, fd: os.File) []os.File {
+    fds[0] = fd;
+    return fds[1..];
+}
+
+fn serializeArgs(buf: []u8, fds: []os.File, args: anytype) void {
     var write_buf = buf;
+    var write_fds = fds;
     inline for (@typeInfo(@TypeOf(args)).@"struct".fields) |field_info| {
         const field = @field(args, field_info.name);
         switch (field_info.type) {
@@ -146,7 +211,9 @@ fn serializeArgs(buf: []u8, args: anytype) void {
             String => write_buf = serializeString(write_buf, field),
             GenericNewId => write_buf = serializeNewId(write_buf, field),
             Array => write_buf = serializeArray(write_buf, field),
-            Fd => @compileError("Fd marshaling is not yet implemented"),
+            os.File => {
+                write_fds = serializeFd(write_fds, field);
+            },
             else => unreachable,
         }
     }
@@ -164,7 +231,7 @@ test "serializeArgs" {
     const expected = [_]u8{ 1, 0, 0, 0, 14, 0, 0, 0, 'w', 'l', '_', 'c', 'o', 'm', 'p', 'o', 's', 'i', 't', 'o', 'r', 0, 0, 0, 6, 0, 0, 0, 3, 0, 0, 0 };
 
     var buf = [_]u8{0} ** 32;
-    _ = serializeArgs(&buf, args);
+    _ = serializeArgs(&buf, &.{}, args);
 
     try std.testing.expectEqual(buf, expected);
 }
@@ -206,9 +273,8 @@ const Array = []const u8;
 
 const Proxy = @This();
 
+const std = @import("std");
+const os = @import("../os.zig");
 const Fixed = @import("../common/Fixed.zig");
 const IdAllocator = @import("../common/IdAllocator.zig");
-const posix = @import("util").posix;
-const Fd = posix.File;
-const std = @import("std");
 const Allocator = std.mem.Allocator;

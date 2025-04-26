@@ -30,17 +30,10 @@ pub fn build(b: *std.Build) void {
         "Optional override path to the core wayland.xml file",
     );
 
-    const util_mod = b.addModule("util", .{
-        .root_source_file = b.path("src/util.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-
     const client_mod = b.addModule("client", .{
         .root_source_file = b.path("src/client.zig"),
         .target = target,
         .optimize = optimize,
-        .imports = &.{.{ .name = "util", .module = util_mod }},
     });
 
     const client_protocol = generateClient(b, core_path, files, dirs, scanner);
@@ -53,7 +46,6 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/server.zig"),
         .target = target,
         .optimize = optimize,
-        .imports = &.{.{ .name = "util", .module = util_mod }},
     });
 
     const server_protocol = generateServer(b, core_path, files, dirs, scanner);
@@ -104,6 +96,8 @@ fn generateClient(
     _ = write_files.addCopyDirectory(generate_files.getDirectory(), "", .{});
     _ = write_files.addCopyDirectory(b.path("src/client"), "client", .{});
     _ = write_files.addCopyDirectory(b.path("src/common"), "common", .{});
+    _ = write_files.addCopyDirectory(b.path("src/os"), "os", .{});
+    _ = write_files.addCopyFile(b.path("src/os.zig"), "os.zig");
     return write_files.addCopyFile(generated, "client_protocol.zig");
 }
 

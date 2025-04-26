@@ -15,6 +15,7 @@ fn_name: []const u8,
 destructor: bool = false,
 numeric_since: ?u32 = null,
 numeric_deprecated_since: ?u32 = null,
+fd_count: usize = 0,
 opcode: u32 = 0,
 allocator: std.mem.Allocator,
 
@@ -58,7 +59,9 @@ pub fn init(allocator: std.mem.Allocator, parser: *Parser) !Self {
                 continue;
             }
             if (std.mem.eql(u8, elem, "arg")) {
-                try self.args.append(try Arg.init(self.allocator, parser));
+                const arg = try Arg.init(self.allocator, parser);
+                if (arg.enumerated_type == .fd) self.fd_count += 1;
+                try self.args.append(arg);
                 continue;
             }
 
@@ -86,14 +89,9 @@ pub fn write(self: Self, writer: std.fs.File.Writer) !void {
     try writer.print("\t\tself: @This(),\n", .{});
     const is_destructor = self.type != null and std.mem.eql(u8, self.type.?, "destructor");
 
-    const is_constructor = blk: {
-        for (self.args.items) |arg| {
-            if (arg.enumerated_type == .new_id) {
-                break :blk true;
-            }
-        }
-        break :blk false;
-    };
+    const is_constructor = for (self.args.items) |arg| {
+        if (arg.enumerated_type == .new_id) break true;
+    } else false;
 
     if (is_destructor) {
         try self.printDestructorArgs(writer);
@@ -155,8 +153,9 @@ fn printNormalArgs(self: Self, writer: std.fs.File.Writer) !void {
         try arg.write(writer);
     }
     try writer.print("\t) !void {{\n", .{});
-    try writer.print("\t\t_ = self;\n", .{});
+    try writer.print("\t\ttry self.proxy.marshalArgs({d}, {d}, .{{\n", .{ self.fd_count, self.opcode });
     for (self.args.items) |arg| {
-        try writer.print("\t\t_ = {s};\n", .{arg.final_name orelse arg.name});
+        try writer.print("\t\t\t{s},", .{arg.final_name orelse arg.name});
     }
+    try writer.print("\t}} );\n", .{});
 }

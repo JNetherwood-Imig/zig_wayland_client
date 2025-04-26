@@ -1,10 +1,10 @@
 gpa: Allocator,
-socket: Socket,
+socket: os.Socket,
 id_allocator: IdAllocator,
 proxy: wl.Display,
 event_queue: EventQueue,
-cancel_pipe: Pipe,
-event_thread: Thread,
+cancel_pipe: os.Pipe,
+event_thread: std.Thread,
 
 pub const ConnectInfo = union(enum) {
     socket: i32,
@@ -26,8 +26,8 @@ pub fn getConnectInfo() GetConnectInfoError!ConnectInfo {
 pub const InitError = Allocator.Error ||
     ConnectError ||
     EventQueue.InitError ||
-    Pipe.CreateError ||
-    Thread.SpawnError;
+    os.Pipe.CreateError ||
+    std.Thread.SpawnError;
 
 pub fn init(gpa: Allocator, connect_info: anytype) InitError!*DisplayConnection {
     const self = try gpa.create(DisplayConnection);
@@ -36,10 +36,18 @@ pub fn init(gpa: Allocator, connect_info: anytype) InitError!*DisplayConnection 
     self.gpa = gpa;
     self.socket = try connect(connect_info);
     self.id_allocator = IdAllocator.init(gpa);
-    self.proxy = wl.Display{};
+    self.proxy = wl.Display{
+        .proxy = .{
+            .id = 1,
+            .event0_index = 0,
+            .socket = self.socket.handle,
+            .id_allocator = &self.id_allocator,
+            .gpa = gpa,
+        },
+    };
     self.event_queue = try EventQueue.init();
-    self.cancel_pipe = try Pipe.create();
-    self.event_thread = try Thread.spawn(.{ .allocator = self.gpa }, pollEvents, .{self});
+    self.cancel_pipe = try os.Pipe.create();
+    self.event_thread = try std.Thread.spawn(.{ .allocator = self.gpa }, pollEvents, .{self});
 
     return self;
 }
@@ -67,13 +75,13 @@ const ConnectError = error{
     InvalidSocketFd,
     NoXdgRuntimeDir,
     SocketPathTooLong,
-} || GetConnectInfoError || Socket.CreateError || Socket.ConnectUnixError;
+} || GetConnectInfoError || os.Socket.CreateError || os.Socket.ConnectUnixError;
 
-fn connect(connect_info: anytype) ConnectError!Socket {
-    return if (@TypeOf(connect_info) == Socket)
+fn connect(connect_info: anytype) ConnectError!os.Socket {
+    return if (@TypeOf(connect_info) == os.Socket)
         connect_info
-    else if (@TypeOf(connect_info) == File)
-        Socket{ .handle = connect_info }
+    else if (@TypeOf(connect_info) == os.File)
+        os.Socket{ .handle = connect_info }
     else switch (try connectInfoFromAny(connect_info)) {
         .socket => |sockfd| try connectToSocket(sockfd),
         .display => |display| try connectToDisplay(display),
@@ -92,8 +100,8 @@ inline fn connectInfoFromAny(connect_info: anytype) !ConnectInfo {
     };
 }
 
-fn connectToSocket(sockfd: i32) !Socket {
-    const socket = Socket{ .handle = .{ .handle = sockfd } };
+fn connectToSocket(sockfd: i32) !os.Socket {
+    const socket = os.Socket{ .handle = .{ .handle = sockfd } };
     var flags = socket.handle.getFlags() catch
         return error.InvalidSocketFd;
     flags.cloexec = true;
@@ -101,8 +109,8 @@ fn connectToSocket(sockfd: i32) !Socket {
     return socket;
 }
 
-fn connectToDisplay(display: []const u8) !Socket {
-    const socket = try Socket.create(.unix, .stream, .{ .cloexec = true }, null);
+fn connectToDisplay(display: []const u8) !os.Socket {
+    const socket = try os.Socket.create(.unix, .stream, .{ .cloexec = true }, null);
     const xdg_runtime_dir = std.posix.getenv("XDG_RUNTIME_DIR") orelse
         return error.NoXdgRuntimeDir;
 
@@ -119,7 +127,7 @@ fn connectToDisplay(display: []const u8) !Socket {
 }
 
 fn pollEvents(self: *DisplayConnection) !void {
-    var pfds = [_]posix.Pollfd{ .{
+    var pfds = [_]os.Pollfd{ .{
         .fd = self.socket.handle,
         .events = .{ .in = true },
     }, .{
@@ -128,7 +136,7 @@ fn pollEvents(self: *DisplayConnection) !void {
     } };
 
     while (true) {
-        _ = try posix.poll(&pfds, -1);
+        _ = try os.poll(&pfds, -1);
         for (&pfds) |*pfd| {
             if (@as(u16, @bitCast(pfd.revents)) != 0) {
                 pfd.revents = .{};
@@ -139,8 +147,8 @@ fn pollEvents(self: *DisplayConnection) !void {
     }
 }
 
-// TODO move to serialization api
-const Header = packed struct(u64) {
+// TODO move to deserialization api
+const Header = packed struct {
     object: u32,
     opcode: u16,
     length: u16,
@@ -148,7 +156,7 @@ const Header = packed struct(u64) {
 
 fn parseEvent(self: *DisplayConnection) !void {
     var head: Header = undefined;
-    _ = try self.socket.handle.toStdFile().read(@as(
+    _ = try self.socket.handle.read(@as(
         [*]u8,
         @ptrCast(@alignCast(&head)),
     )[0..@sizeOf(Header)]);
@@ -157,7 +165,7 @@ fn parseEvent(self: *DisplayConnection) !void {
         head.length - @sizeOf(Header),
     );
     defer self.gpa.free(buf);
-    _ = try self.socket.handle.toStdFile().read(buf);
+    _ = try self.socket.handle.read(buf);
 
     // TEMP
     if (head.object == 2 and head.opcode == 0)
@@ -167,14 +175,10 @@ fn parseEvent(self: *DisplayConnection) !void {
 const DisplayConnection = @This();
 
 const std = @import("std");
-const Allocator = std.mem.Allocator;
-const Thread = std.Thread;
 const wl = @import("client_protocol");
+const os = @import("../os.zig");
+const testing = std.testing;
 const EventQueue = @import("EventQueue.zig");
 const IdAllocator = @import("../common/IdAllocator.zig");
-const posix = @import("util").posix;
-const Pipe = posix.Pipe;
-const Socket = posix.Socket;
-const File = posix.File;
 const Proxy = @import("Proxy.zig");
-const testing = std.testing;
+const Allocator = std.mem.Allocator;

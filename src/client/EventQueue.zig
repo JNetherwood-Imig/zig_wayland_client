@@ -1,6 +1,6 @@
 queue: Queue,
-mutex: Thread.Mutex,
-condition: Thread.Condition,
+mutex: std.Thread.Mutex,
+condition: std.Thread.Condition,
 cancelled: bool,
 
 pub const InitError = error{};
@@ -53,6 +53,5 @@ pub fn cancel(self: *EventQueue) void {
 const EventQueue = @This();
 
 const std = @import("std");
-const Thread = std.Thread;
-const Queue = std.fifo.LinearFifo(wl.Event, .{ .Static = 64 });
 const wl = @import("client_protocol");
+const Queue = std.fifo.LinearFifo(wl.Event, .{ .Static = 64 });
