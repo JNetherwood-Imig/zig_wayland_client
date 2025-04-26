@@ -111,9 +111,9 @@ const IdAllocator = @This();
 const std = @import("std");
 const testing = std.testing;
 const Allocator = std.mem.Allocator;
+const Mutex = std.Thread.Mutex;
 const FreeList = std.PriorityQueue(u32, void, struct {
     pub fn lessThan(_: void, a: u32, b: u32) std.math.Order {
         return std.math.order(a, b);
     }
 }.lessThan);
-const Mutex = std.Thread.Mutex;

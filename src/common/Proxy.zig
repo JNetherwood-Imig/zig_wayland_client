@@ -60,7 +60,7 @@ test "marshalArgs" {
     const proxy = Proxy{
         .id = 1,
         .event0_index = 0,
-        .socket = .{ .handle = client },
+        .socket = client,
         .id_allocator = &id_alloc,
         .gpa = std.testing.allocator,
     };
@@ -274,7 +274,7 @@ const Array = []const u8;
 const Proxy = @This();
 
 const std = @import("std");
-const os = @import("../os.zig");
-const Fixed = @import("../common/Fixed.zig");
-const IdAllocator = @import("../common/IdAllocator.zig");
+const os = @import("os");
+const Fixed = @import("Fixed.zig");
+const IdAllocator = @import("IdAllocator.zig");
 const Allocator = std.mem.Allocator;

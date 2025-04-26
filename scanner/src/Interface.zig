@@ -99,7 +99,7 @@ pub fn write(self: Self, writer: std.fs.File.Writer) !void {
 
     try writer.print("pub const {s} = struct {{\n", .{self.type_name});
 
-    try writer.print("\tproxy: @import(\"client/Proxy.zig\"),", .{});
+    try writer.print("\tproxy: @import(\"common\").Proxy,\n", .{});
 
     try writer.print("\tpub const interface = \"{s}\";\n", .{self.name});
 

@@ -175,10 +175,11 @@ fn parseEvent(self: *DisplayConnection) !void {
 const DisplayConnection = @This();
 
 const std = @import("std");
+const os = @import("os");
+const common = @import("common");
 const wl = @import("client_protocol");
-const os = @import("../os.zig");
 const testing = std.testing;
 const EventQueue = @import("EventQueue.zig");
-const IdAllocator = @import("../common/IdAllocator.zig");
-const Proxy = @import("Proxy.zig");
 const Allocator = std.mem.Allocator;
+const IdAllocator = common.IdAllocator;
+const Proxy = common.Proxy;

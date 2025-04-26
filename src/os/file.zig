@@ -420,13 +420,6 @@ pub const File = packed struct(i32) {
         @as(*T, @ptrCast(@alignCast(&buf[@sizeOf(CmsgHdr)]))).* = data;
     }
 
-    test "serializeCmsg" {
-        const data = [2]File{ .{ .handle = -1 }, .{ .handle = 2 } };
-        var buf = [_]u8{0} ** 24;
-        serializeCmsg(&buf, @TypeOf(data), data, .rights);
-        std.debug.print("{any}\n", .{buf});
-    }
-
     const FcntlCommand = enum(u32) {
         dupfd = system.F.DUPFD,
         getfd = system.F.GETFD,
