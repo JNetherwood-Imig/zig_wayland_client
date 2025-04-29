@@ -135,10 +135,16 @@ pub fn write(self: Self, deps: []const DependencyInfo) !void {
     try self.printCopyright(writer);
     try self.printDescription(writer);
 
-    try writer.print("const std = @import(\"std\");\n", .{});
-    try writer.print("const common = @import(\"common\");\n", .{});
-    try writer.print("const Proxy = common.Proxy;\n", .{});
-    try writer.print("const GenericNewId = Proxy.GenericNewId;\n", .{});
+    const protocol_header =
+        \\const os = @import("os");
+        \\const common = @import("common");
+        \\const File = os.File;
+        \\const Fixed = common.Fixed;
+        \\const Proxy = common.Proxy;
+        \\const GenericNewId = Proxy.GenericNewId;
+        \\
+    ;
+    try writer.writeAll(protocol_header);
 
     for (self.dependencies.items) |dep| {
         var found = false;

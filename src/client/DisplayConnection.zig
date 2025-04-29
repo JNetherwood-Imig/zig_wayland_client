@@ -1,6 +1,7 @@
 gpa: Allocator,
 socket: os.Socket,
 id_allocator: IdAllocator,
+objects: std.ArrayList(Proxy),
 proxy: wl.Display,
 event_queue: EventQueue,
 cancel_pipe: os.Pipe,
@@ -25,7 +26,6 @@ pub fn getConnectInfo() GetConnectInfoError!ConnectInfo {
 
 pub const InitError = Allocator.Error ||
     ConnectError ||
-    EventQueue.InitError ||
     os.Pipe.CreateError ||
     std.Thread.SpawnError;
 
@@ -36,18 +36,21 @@ pub fn init(gpa: Allocator, connect_info: anytype) InitError!*DisplayConnection 
     self.gpa = gpa;
     self.socket = try connect(connect_info);
     self.id_allocator = IdAllocator.init(gpa);
+    self.objects = try std.ArrayList(Proxy).initCapacity(gpa, 4);
     self.proxy = wl.Display{
         .proxy = .{
             .id = 1,
             .event0_index = 0,
             .socket = self.socket.handle,
             .id_allocator = &self.id_allocator,
+            .object_list = &self.objects,
             .gpa = gpa,
         },
     };
-    self.event_queue = try EventQueue.init();
+    self.event_queue = EventQueue.init();
     self.cancel_pipe = try os.Pipe.create();
     self.event_thread = try std.Thread.spawn(.{ .allocator = self.gpa }, pollEvents, .{self});
+    try self.objects.append(self.proxy.proxy);
 
     return self;
 }
@@ -60,6 +63,7 @@ pub fn deinit(self: *DisplayConnection) void {
     self.event_queue.deinit();
     self.id_allocator.deinit();
     self.socket.close();
+    self.objects.deinit();
     self.gpa.destroy(self);
 }
 
@@ -155,7 +159,6 @@ fn pollEvents(self: *DisplayConnection) !void {
     }
 }
 
-// TODO move to deserialization api
 const Header = packed struct {
     object: u32,
     opcode: u16,
@@ -175,19 +178,58 @@ fn parseEvent(self: *DisplayConnection) !void {
     defer self.gpa.free(buf);
     _ = try self.socket.handle.read(buf);
 
-    // TEMP
-    if (head.object == 2 and head.opcode == 0) {
-        const name = std.mem.bytesToValue(u32, buf[0..4]);
-        const interface_len = std.mem.bytesToValue(u32, buf[4..8]);
-        const interface = buf[8 .. interface_len + 7];
-        const version = std.mem.bytesToValue(u32, buf[buf.len - 4 ..]);
-        self.event_queue.emplace(.{ .registry_global = .{
-            .self = undefined,
-            .name = name,
-            .interface = try self.gpa.dupe(u8, interface),
-            .version = version,
-        } });
+    const proxy = for (self.objects.items) |obj| {
+        if (obj.id == head.object) break obj;
+    } else unreachable;
+    const event = serializeEvent(self.gpa, head.opcode + proxy.event0_index, &.{}, buf) catch return;
+    self.event_queue.emplace(event);
+}
+
+fn serializeEvent(gpa: Allocator, proxy: Proxy, event_index: usize, fds: []os.File, buf: []const u8) !wl.Event {
+    const tag_name = @tagName(@as(wl.EventType, @enumFromInt(event_index)));
+    inline for (@typeInfo(wl.Event).@"union".fields) |union_field| {
+        if (std.mem.eql(u8, union_field.name, tag_name)) {
+            const struct_type = union_field.type;
+            var struct_value: struct_type = undefined;
+            @field(struct_value, "self") = @fieldParentPtr(@FieldType(struct_type, "self"), proxy);
+            var index: usize = 0;
+            var fd_idx: usize = 0;
+            inline for (@typeInfo(struct_type).@"struct".fields) |field| {
+                if (comptime std.mem.eql(u8, field.name, "self")) continue;
+                switch (field.type) {
+                    u32 => {
+                        @field(struct_value, field.name) = std.mem.bytesToValue(u32, buf[index .. index + 4]);
+                        index += 4;
+                    },
+                    i32 => {
+                        @field(struct_value, field.name) = std.mem.bytesToValue(i32, buf[index .. index + 4]);
+                        index += 4;
+                    },
+                    []const u8 => {
+                        const len = std.mem.bytesToValue(u32, buf[index .. index + 4]);
+                        index += 4;
+                        const rounded_len = (len + 3) & ~@as(u32, 3);
+                        @field(struct_value, field.name) = try gpa.dupe(u8, buf[index .. index + len]);
+                        index += rounded_len;
+                    },
+                    [:0]const u8 => {
+                        const len = std.mem.bytesToValue(u32, buf[index .. index + 4]);
+                        index += 4;
+                        const rounded_len = (len + 3) & ~@as(u32, 3);
+                        @field(struct_value, field.name) = @ptrCast(try gpa.dupeZ(u8, buf[index .. index + len - 1]));
+                        index += rounded_len;
+                    },
+                    os.File => {
+                        @field(struct_value, field.name) = fds[fd_idx];
+                        fd_idx += 1;
+                    },
+                    else => std.debug.panic("Unexpected type: {s}", .{@typeName(field.type)}),
+                }
+            }
+            return @unionInit(wl.Event, union_field.name, struct_value);
+        }
     }
+    unreachable;
 }
 
 const DisplayConnection = @This();

@@ -8,15 +8,16 @@ pub fn main() !void {
 
     const disp = try wl.DisplayConnection.init(alloc, {});
     defer disp.deinit();
-    const reg = try disp.getRegistry();
-    _ = reg;
+    _ = try disp.getRegistry();
+    _ = try disp.sync();
 
     while (disp.waitNextEvent()) |ev| switch (ev) {
         .registry_global => |g| {
             std.debug.print("{d}: {s} ({d})\n", .{ g.name, g.interface, g.version });
-            disp.gpa.free(g.interface);
+            alloc.free(g.interface);
         },
         .registry_global_remove => std.debug.print("Recieved registry global remove\n", .{}),
+        .callback_done => break,
         else => |event| std.debug.panic("Unexpected wl event recieved: {s}\n", .{@tagName(event)}),
     };
 }

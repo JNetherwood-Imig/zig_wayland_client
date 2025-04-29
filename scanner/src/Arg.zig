@@ -106,10 +106,10 @@ pub fn write(self: Self, writer: std.fs.File.Writer) !void {
         .int => "i32",
         .uint => "u32",
         .object => self.interface_type orelse "u32",
-        .fd => "std.posix.fd_t", // Maybe this should be an i32 to avoid importing std?
-        .array => "*anyopaque", // Should this be a slice or anytype?
-        .string => "[]const u8",
-        .fixed => "i32", // TODO implement fixed type with conversion utils
+        .fd => "File",
+        .array => "[]const u8",
+        .string => "[:0]const u8",
+        .fixed => "Fixed",
         .new_id => self.interface_type orelse "u32",
     };
     if (self.description) |description| {

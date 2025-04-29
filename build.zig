@@ -79,6 +79,7 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = optimize,
             .imports = &.{
+                .{ .name = "os", .module = os },
                 .{ .name = "common", .module = common },
             },
         });

@@ -2,6 +2,7 @@ id: u32,
 event0_index: usize,
 socket: os.File,
 id_allocator: *IdAllocator,
+object_list: *std.ArrayList(Proxy),
 gpa: Allocator,
 
 pub fn marshalCreateArgs(
@@ -13,14 +14,17 @@ pub fn marshalCreateArgs(
     args: anytype,
 ) !T {
     try self.marshalArgs(fd_count, opcode, args);
+    const proxy = Proxy{
+        .socket = self.socket,
+        .event0_index = T.event0_index,
+        .id = new_id,
+        .id_allocator = self.id_allocator,
+        .object_list = self.object_list,
+        .gpa = self.gpa,
+    };
+    try self.object_list.append(proxy);
     return T{
-        .proxy = Proxy{
-            .socket = self.socket,
-            .event0_index = T.event0_index,
-            .id = new_id,
-            .id_allocator = self.id_allocator,
-            .gpa = self.gpa,
-        },
+        .proxy = proxy,
     };
 }
 

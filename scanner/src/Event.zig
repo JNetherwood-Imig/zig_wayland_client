@@ -78,7 +78,7 @@ pub fn deinit(self: Self) void {
 pub fn write(self: Self, writer: std.fs.File.Writer) !void {
     if (self.description) |description| try description.emit(writer, "\t///");
     try writer.print("\tpub const {s}Event = struct {{\n", .{self.type_name});
-    try writer.print("\t\tself: *const {s},\n", .{self.interface.type_name});
+    try writer.print("\t\tself: {s},\n", .{self.interface.type_name});
     for (self.args.items) |arg| try arg.write(writer);
     try writer.print("\t}};\n", .{});
 }

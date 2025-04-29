@@ -3,9 +3,7 @@ mutex: Thread.Mutex,
 condition: Thread.Condition,
 cancelled: bool,
 
-pub const InitError = error{};
-
-pub fn init() InitError!EventQueue {
+pub fn init() EventQueue {
     return EventQueue{
         .queue = Queue.init(),
         .mutex = .{},
