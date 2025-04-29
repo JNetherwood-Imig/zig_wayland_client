@@ -4,14 +4,6 @@ socket: os.File,
 id_allocator: *IdAllocator,
 gpa: Allocator,
 
-pub const GenericNewId = struct {
-    interface: String,
-    version: u32,
-    id: u32,
-};
-
-pub const MarshalCreateArgsError = error{};
-
 pub fn marshalCreateArgs(
     self: Proxy,
     comptime T: type,
@@ -202,7 +194,9 @@ test "serializeArgs" {
             .id = 3,
         },
     };
-    const expected = [_]u8{ 1, 0, 0, 0, 14, 0, 0, 0, 'w', 'l', '_', 'c', 'o', 'm', 'p', 'o', 's', 'i', 't', 'o', 'r', 0, 0, 0, 6, 0, 0, 0, 3, 0, 0, 0 };
+    const expected = [_]u8{ 1, 0, 0, 0, 14, 0, 0, 0 } ++
+        [_]u8{ 'w', 'l', '_', 'c', 'o', 'm', 'p', 'o', 's', 'i', 't', 'o', 'r', 0, 0, 0 } ++
+        [_]u8{ 6, 0, 0, 0, 3, 0, 0, 0 };
 
     var buf = [_]u8{0} ** 32;
     _ = serializeArgs(&buf, &.{}, args);
@@ -210,39 +204,16 @@ test "serializeArgs" {
     try std.testing.expectEqual(buf, expected);
 }
 
-inline fn roundup4(value: anytype) @TypeOf(value) {
-    switch (@typeInfo(@TypeOf(value))) {
-        .int => {},
-        else => @compileError("Expected an integer type for roundup4"),
-    }
-
-    return (value + 3) & ~@as(@TypeOf(value), 3);
-}
-
-test "roundup4" {
-    const i32_3: i32 = 3;
-    const usize_9: usize = 9;
-    const i8_12: i8 = 12;
-
-    try std.testing.expectEqual(@as(i32, 4), roundup4(i32_3));
-    try std.testing.expectEqual(@as(usize, 12), roundup4(usize_9));
-    try std.testing.expectEqual(@as(i8, 12), roundup4(i8_12));
-}
-
-const Header = packed struct {
-    object: u32,
-    opcode: u16,
-    length: u16,
-};
-
-const String = [:0]const u8;
-
-const Array = []const u8;
-
 const Proxy = @This();
 
 const std = @import("std");
 const os = @import("os");
+const cm = @import("client_message.zig");
 const Fixed = @import("Fixed.zig");
 const IdAllocator = @import("IdAllocator.zig");
 const Allocator = std.mem.Allocator;
+const roundup4 = cm.roundup4;
+const GenericNewId = cm.GenericNewId;
+const Array = cm.Array;
+const String = cm.String;
+const Header = cm.Header;
