@@ -28,30 +28,7 @@ pub fn build(b: *std.Build) void {
         "Optional override path to the core wayland.xml file",
     );
 
-    const os = b.createModule(.{
-        .root_source_file = b.path("src/os.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-
-    const common = b.createModule(.{
-        .root_source_file = b.path("src/common.zig"),
-        .target = target,
-        .optimize = optimize,
-        .imports = &.{
-            .{ .name = "os", .module = os },
-        },
-    });
-
-    const os_test = b.addTest(.{ .root_module = os });
-    const run_os_test = b.addRunArtifact(os_test);
-
-    const common_test = b.addTest(.{ .root_module = common });
-    const run_common_test = b.addRunArtifact(common_test);
-
     const test_step = b.step("test", "Run unit tests");
-    test_step.dependOn(&run_os_test.step);
-    test_step.dependOn(&run_common_test.step);
 
     inline for ([_][]const u8{ "client", "server" }) |mod_name| {
         const generate_files = b.addWriteFiles();
@@ -71,28 +48,23 @@ pub fn build(b: *std.Build) void {
         };
 
         const write_files = b.addWriteFiles();
-        _ = write_files.addCopyDirectory(generate_files.getDirectory(), "", .{});
         const output = write_files.addCopyFile(generated, mod_name ++ "_protocol.zig");
+        _ = write_files.addCopyDirectory(generate_files.getDirectory(), "", .{});
+        _ = write_files.addCopyFile(b.path("src/os.zig"), "os.zig");
+        _ = write_files.addCopyDirectory(b.path("src/os"), "os", .{});
+        _ = write_files.addCopyDirectory(b.path("src/common"), "common", .{});
+        const mod_file = write_files.addCopyFile(b.path("src/" ++ mod_name ++ ".zig"), mod_name ++ ".zig");
+        _ = write_files.addCopyDirectory(b.path("src/" ++ mod_name), mod_name, .{});
 
-        const protocol_mod = b.createModule(.{
+        const mod = b.addModule(mod_name, .{
+            .root_source_file = mod_file,
+            .target = target,
+            .optimize = optimize,
+        });
+        mod.addAnonymousImport(mod_name ++ "_protocol", .{
             .root_source_file = output,
             .target = target,
             .optimize = optimize,
-            .imports = &.{
-                .{ .name = "os", .module = os },
-                .{ .name = "common", .module = common },
-            },
-        });
-
-        const mod = b.addModule(mod_name, .{
-            .root_source_file = b.path("src/" ++ mod_name ++ ".zig"),
-            .target = target,
-            .optimize = optimize,
-            .imports = &.{
-                .{ .name = "os", .module = os },
-                .{ .name = "common", .module = common },
-                .{ .name = mod_name ++ "_protocol", .module = protocol_mod },
-            },
         });
 
         const mod_test = b.addTest(.{ .root_module = mod });

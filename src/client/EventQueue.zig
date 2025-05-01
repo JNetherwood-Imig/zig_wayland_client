@@ -52,6 +52,5 @@ const EventQueue = @This();
 
 const std = @import("std");
 const wl = @import("client_protocol");
-const common = @import("common");
 const Queue = std.fifo.LinearFifo(wl.Event, .{ .Static = 64 });
 const Thread = std.Thread;

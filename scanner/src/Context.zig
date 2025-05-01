@@ -96,23 +96,24 @@ fn writeClientProtocols(self: *Self) !void {
 
     try self.writer.print("pub usingnamespace @import(\"event.zig\");\n", .{});
 
-    for (self.protocols.items) |protocol| try protocol.write(self.dependencies.items);
+    for (self.protocols.items) |protocol| try protocol.writeClient(self.dependencies.items);
 }
 
 fn writeServerProtocols(self: *Self) !void {
-    for (self.files.items) |file| {
-        const protocol = try Protocol.init(self.allocator, file);
-        try self.protocols.append(protocol);
-        for (protocol.interfaces.items) |interface| try self.dependencies.append(DependencyInfo{
-            .interface = interface.type_name,
-            .protocol = protocol.name,
-        });
-    }
+    _ = self;
+    // for (self.files.items) |file| {
+    //     const protocol = try Protocol.init(self.allocator, file);
+    //     try self.protocols.append(protocol);
+    //     for (protocol.interfaces.items) |interface| try self.dependencies.append(DependencyInfo{
+    //         .interface = interface.type_name,
+    //         .protocol = protocol.name,
+    //     });
+    // }
 
-    for (self.protocols.items) |*protocol| {
-        try protocol.finalize();
-        try self.writer.print("pub usingnamespace @import(\"{s}.zig\");\n", .{protocol.name});
-    }
+    // for (self.protocols.items) |*protocol| {
+    //     try protocol.finalize();
+    //     try self.writer.print("pub usingnamespace @import(\"{s}.zig\");\n", .{protocol.name});
+    // }
 }
 
 pub const DependencyInfo = struct {

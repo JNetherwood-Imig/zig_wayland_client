@@ -153,93 +153,34 @@ fn pollEvents(self: *DisplayConnection) !void {
             if (@as(u16, @bitCast(pfd.revents)) != 0) {
                 pfd.revents = .{};
                 if (pfd.fd == self.cancel_pipe.getReadFile()) return;
-                if (pfd.fd == self.socket.handle) try parseEvent(self);
+                if (pfd.fd == self.socket.handle) try recieveEvent(self);
             }
         }
     }
 }
 
-const Header = packed struct {
-    object: u32,
-    opcode: u16,
-    length: u16,
-};
-
-fn parseEvent(self: *DisplayConnection) !void {
+fn recieveEvent(self: *DisplayConnection) !void {
     var head: Header = undefined;
-    _ = try self.socket.handle.read(@as(
-        [*]u8,
-        @ptrCast(@alignCast(&head)),
-    )[0..@sizeOf(Header)]);
-    const buf = try self.gpa.alloc(
-        u8,
-        head.length - @sizeOf(Header),
-    );
-    defer self.gpa.free(buf);
-    _ = try self.socket.handle.read(buf);
+    _ = try self.socket.handle.read(std.mem.asBytes(&head));
 
     const proxy = for (self.objects.items) |obj| {
         if (obj.id == head.object) break obj;
     } else unreachable;
-    const event = serializeEvent(self.gpa, head.opcode + proxy.event0_index, &.{}, buf) catch return;
-    self.event_queue.emplace(event);
-}
 
-fn serializeEvent(gpa: Allocator, proxy: Proxy, event_index: usize, fds: []os.File, buf: []const u8) !wl.Event {
-    const tag_name = @tagName(@as(wl.EventType, @enumFromInt(event_index)));
-    inline for (@typeInfo(wl.Event).@"union".fields) |union_field| {
-        if (std.mem.eql(u8, union_field.name, tag_name)) {
-            const struct_type = union_field.type;
-            var struct_value: struct_type = undefined;
-            @field(struct_value, "self") = @fieldParentPtr(@FieldType(struct_type, "self"), proxy);
-            var index: usize = 0;
-            var fd_idx: usize = 0;
-            inline for (@typeInfo(struct_type).@"struct".fields) |field| {
-                if (comptime std.mem.eql(u8, field.name, "self")) continue;
-                switch (field.type) {
-                    u32 => {
-                        @field(struct_value, field.name) = std.mem.bytesToValue(u32, buf[index .. index + 4]);
-                        index += 4;
-                    },
-                    i32 => {
-                        @field(struct_value, field.name) = std.mem.bytesToValue(i32, buf[index .. index + 4]);
-                        index += 4;
-                    },
-                    []const u8 => {
-                        const len = std.mem.bytesToValue(u32, buf[index .. index + 4]);
-                        index += 4;
-                        const rounded_len = (len + 3) & ~@as(u32, 3);
-                        @field(struct_value, field.name) = try gpa.dupe(u8, buf[index .. index + len]);
-                        index += rounded_len;
-                    },
-                    [:0]const u8 => {
-                        const len = std.mem.bytesToValue(u32, buf[index .. index + 4]);
-                        index += 4;
-                        const rounded_len = (len + 3) & ~@as(u32, 3);
-                        @field(struct_value, field.name) = @ptrCast(try gpa.dupeZ(u8, buf[index .. index + len - 1]));
-                        index += rounded_len;
-                    },
-                    os.File => {
-                        @field(struct_value, field.name) = fds[fd_idx];
-                        fd_idx += 1;
-                    },
-                    else => std.debug.panic("Unexpected type: {s}", .{@typeName(field.type)}),
-                }
-            }
-            return @unionInit(wl.Event, union_field.name, struct_value);
-        }
-    }
-    unreachable;
+    const event = try proxy.parseEvent(head);
+    self.event_queue.emplace(event);
 }
 
 const DisplayConnection = @This();
 
 const std = @import("std");
-const os = @import("os");
-const common = @import("common");
 const wl = @import("client_protocol");
-const testing = std.testing;
+const os = @import("../os.zig");
+const m = @import("../common/message_utils.zig");
+const IdAllocator = @import("../common/IdAllocator.zig");
+const Proxy = @import("Proxy.zig");
 const EventQueue = @import("EventQueue.zig");
+const testing = std.testing;
+const roundup4 = m.roundup4;
 const Allocator = std.mem.Allocator;
-const IdAllocator = common.IdAllocator;
-const Proxy = common.Proxy;
+const Header = m.Header;

@@ -1,3 +1,6 @@
+pub const String = [:0]const u8;
+pub const Array = []const u8;
+
 pub const GenericNewId = struct {
     interface: String,
     version: u32,
@@ -18,10 +21,9 @@ test "roundup4" {
     const usize_9: usize = 9;
     const i8_12: i8 = 12;
 
-    roundup4(@as(f64, 4.0));
-    try std.testing.expectEqual(@as(i32, 4), roundup4(i32_3));
-    try std.testing.expectEqual(@as(usize, 12), roundup4(usize_9));
-    try std.testing.expectEqual(@as(i8, 12), roundup4(i8_12));
+    try testing.expectEqual(@as(i32, 4), roundup4(i32_3));
+    try testing.expectEqual(@as(usize, 12), roundup4(usize_9));
+    try testing.expectEqual(@as(i8, 12), roundup4(i8_12));
 }
 
 pub const Header = packed struct {
@@ -30,8 +32,4 @@ pub const Header = packed struct {
     length: u16,
 };
 
-pub const String = [:0]const u8;
-
-pub const Array = []const u8;
-
-const std = @import("std");
+const testing = @import("std").testing;

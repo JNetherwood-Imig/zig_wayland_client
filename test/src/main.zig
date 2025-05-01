@@ -9,7 +9,7 @@ pub fn main() !void {
     const disp = try wl.DisplayConnection.init(alloc, {});
     defer disp.deinit();
     _ = try disp.getRegistry();
-    _ = try disp.sync();
+    const cb = try disp.sync();
 
     while (disp.waitNextEvent()) |ev| switch (ev) {
         .registry_global => |g| {
@@ -17,7 +17,7 @@ pub fn main() !void {
             alloc.free(g.interface);
         },
         .registry_global_remove => std.debug.print("Recieved registry global remove\n", .{}),
-        .callback_done => break,
+        .callback_done => |done| if (done.self.proxy.id == cb.proxy.id) break,
         else => |event| std.debug.panic("Unexpected wl event recieved: {s}\n", .{@tagName(event)}),
     };
 }
