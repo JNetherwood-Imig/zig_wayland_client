@@ -51,76 +51,70 @@ pub fn marshalArgs(self: Proxy, comptime fd_count: usize, opcode: u32, args: any
     if (sent < buf.len) try self.socket.writeAll(buf[sent..]);
 }
 
-const wl = struct {
-    const EventType = enum(u32) {
-        none,
-    };
-
-    const Event = union(EventType) {
-        none: void,
-    };
-};
-
-pub fn parseEvent(self: Proxy, header: Header) wl.Event {
-    const tag_name = @tagName(@as(wl.EventType, @enumFromInt(self.event0_index + header.opcode)));
-    const union_field_info = inline for (@typeInfo(wl.Event).@"union".fields) |field| {
+pub fn parseEvent(self: Proxy, header: Header) !Event {
+    const tag_name = @tagName(@as(EventType, @enumFromInt(self.event0_index + header.opcode)));
+    inline for (@typeInfo(Event).@"union".fields) |field| {
         if (std.mem.eql(u8, field.name, tag_name)) {
-            break field;
-        }
-    } else unreachable;
-    const struct_type = union_field_info.type;
-    var struct_value = struct_type{ .self = .{ .proxy = self } };
+            const union_field_info = field;
+            const struct_type = union_field_info.type;
+            var struct_value: struct_type = undefined;
+            struct_value.self = .{ .proxy = self };
 
-    const fd_count = count: {
-        comptime var count: usize = 0;
-        inline for (@typeInfo(struct_type).@"struct".fields) |field| {
-            if (@TypeOf(field) == os.File) count += 1;
-        }
-        break :count count;
-    };
+            const fd_count = count: {
+                comptime var count: usize = 0;
+                inline for (@typeInfo(struct_type).@"struct".fields) |s_field| {
+                    if (@TypeOf(s_field) == os.File) count += 1;
+                }
+                break :count count;
+            };
 
-    const buf = try self.gpa.alloc(u8, header.length - @sizeOf(Header));
-    defer self.gpa.free(buf);
+            const buf = try self.gpa.alloc(u8, header.length - @sizeOf(Header));
+            defer self.gpa.free(buf);
 
-    var fds: [fd_count]os.File = undefined;
-    _ = try self.socket.recieveMessage(@TypeOf(fds), &fds, buf, 0);
+            var fds: [fd_count]os.File = undefined;
+            _ = try self.socket.recieveMessage(@TypeOf(fds), &fds, buf, 0);
 
-    var index: usize = 0;
-    var fd_idx: usize = 0;
+            var index: usize = 0;
+            var fd_idx: usize = 0;
 
-    inline for (@typeInfo(struct_type).@"struct".fields) |field| {
-        if (comptime std.mem.eql(u8, field.name, "self")) continue;
-        switch (field.type) {
-            u32 => {
-                @field(struct_value, field.name) = std.mem.bytesToValue(u32, buf[index .. index + 4]);
-                index += 4;
-            },
-            i32 => {
-                @field(struct_value, field.name) = std.mem.bytesToValue(i32, buf[index .. index + 4]);
-                index += 4;
-            },
-            Array => {
-                const len = std.mem.bytesToValue(u32, buf[index .. index + 4]);
-                index += 4;
-                const rounded_len = roundup4(len);
-                @field(struct_value, field.name) = try self.gpa.dupe(u8, buf[index .. index + len]);
-                index += rounded_len;
-            },
-            String => {
-                const len = std.mem.bytesToValue(u32, buf[index .. index + 4]);
-                index += 4;
-                const rounded_len = roundup4(len);
-                @field(struct_value, field.name) = try self.gpa.dupeZ(u8, buf[index .. index + len - 1]);
-                index += rounded_len;
-            },
-            os.File => {
-                @field(struct_value, field.name) = fds[fd_idx];
-                fd_idx += 1;
-            },
-            else => std.debug.panic("Unexpected type: {s}", .{@typeName(field.type)}),
+            inline for (@typeInfo(struct_type).@"struct".fields) |s_field| {
+                if (comptime std.mem.eql(u8, s_field.name, "self")) continue;
+                switch (s_field.type) {
+                    u32 => {
+                        @field(struct_value, s_field.name) = std.mem.bytesToValue(u32, buf[index .. index + 4]);
+                        index += 4;
+                    },
+                    i32 => {
+                        @field(struct_value, s_field.name) = std.mem.bytesToValue(i32, buf[index .. index + 4]);
+                        index += 4;
+                    },
+                    Array => {
+                        const len = std.mem.bytesToValue(u32, buf[index .. index + 4]);
+                        index += 4;
+                        const rounded_len = roundup4(len);
+                        @field(struct_value, s_field.name) = try self.gpa.dupe(u8, buf[index .. index + len]);
+                        index += rounded_len;
+                    },
+                    String => {
+                        const len = std.mem.bytesToValue(u32, buf[index .. index + 4]);
+                        index += 4;
+                        const rounded_len = roundup4(len);
+                        @field(struct_value, s_field.name) = try self.gpa.dupeZ(u8, buf[index .. index + len - 1]);
+                        index += rounded_len;
+                    },
+                    os.File => {
+                        if (fd_count > 0) {
+                            @field(struct_value, s_field.name) = fds[fd_idx];
+                            fd_idx += 1;
+                        }
+                    },
+                    else => std.debug.panic("Unexpected type: {s}", .{@typeName(s_field.type)}),
+                }
+            }
+            return @unionInit(Event, union_field_info.name, struct_value);
         }
     }
-    return @unionInit(wl.Event, union_field_info.name, struct_value);
+    unreachable;
 }
 
 fn calculateArgsLen(args: anytype) usize {
@@ -187,6 +181,7 @@ fn serializeString(buf: []u8, string: String) []u8 {
     var write_buf = serializeUint(buf, len);
     const padded_len = roundup4(len);
     @memcpy(write_buf[0..string.len], string);
+    write_buf[string.len] = 0;
     return write_buf[padded_len..];
 }
 
@@ -283,11 +278,15 @@ test "serializeArgs" {
 const Proxy = @This();
 
 const std = @import("std");
-const os = @import("../os.zig");
-const m = @import("../common/message_utils.zig");
-const Fixed = @import("../common/Fixed.zig");
-const IdAllocator = @import("../common/IdAllocator.zig");
+const os = @import("os");
+const common = @import("common");
+const m = common.message_utils;
 const roundup4 = m.roundup4;
+const event = @import("../event.zig"); // present after this file is copied in
+const Event = event.Event;
+const EventType = event.EventType;
+const Fixed = common.Fixed;
+const IdAllocator = common.IdAllocator;
 const Allocator = std.mem.Allocator;
 const GenericNewId = m.GenericNewId;
 const Array = m.Array;

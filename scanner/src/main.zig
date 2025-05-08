@@ -62,10 +62,10 @@ pub fn main() !void {
     }
 
     if (provided_core_path) |path| {
-        try ctx.addFile(try std.fs.cwd().openFile(path, .{}));
+        try ctx.files.insert(0, try std.fs.cwd().openFile(path, .{}));
     } else {
         const path = "/usr/share/wayland/wayland.xml";
-        try ctx.addFile(try std.fs.openFileAbsolute(path, .{}));
+        try ctx.files.insert(0, try std.fs.openFileAbsolute(path, .{}));
     }
 
     try ctx.writeProtocols();

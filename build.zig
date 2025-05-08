@@ -28,7 +28,40 @@ pub fn build(b: *std.Build) void {
         "Optional override path to the core wayland.xml file",
     );
 
+    const os = b.createModule(.{
+        .root_source_file = b.path("src/os.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const os_test = b.addTest(.{
+        .root_module = os,
+        .use_llvm = false,
+        .use_lld = false,
+    });
+
+    const run_os_test = b.addRunArtifact(os_test);
+
+    const common = b.createModule(.{
+        .root_source_file = b.path("src/common.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "os", .module = os },
+        },
+    });
+
+    const common_test = b.addTest(.{
+        .root_module = common,
+        .use_llvm = false,
+        .use_lld = false,
+    });
+
+    const run_common_test = b.addRunArtifact(common_test);
+
     const test_step = b.step("test", "Run unit tests");
+    test_step.dependOn(&run_os_test.step);
+    test_step.dependOn(&run_common_test.step);
 
     inline for ([_][]const u8{ "client", "server" }) |mod_name| {
         const generate_files = b.addWriteFiles();
@@ -39,6 +72,7 @@ pub fn build(b: *std.Build) void {
         const generated = run_scanner.addPrefixedOutputFileArg("-o", "generated.zig");
 
         if (core_path) |path| run_scanner.addPrefixedFileArg("-c", path);
+
         if (files) |f| for (f) |file| {
             run_scanner.addPrefixedFileArg("-f", file);
         };
@@ -50,26 +84,39 @@ pub fn build(b: *std.Build) void {
         const write_files = b.addWriteFiles();
         const output = write_files.addCopyFile(generated, mod_name ++ "_protocol.zig");
         _ = write_files.addCopyDirectory(generate_files.getDirectory(), "", .{});
-        _ = write_files.addCopyFile(b.path("src/os.zig"), "os.zig");
-        _ = write_files.addCopyDirectory(b.path("src/os"), "os", .{});
-        _ = write_files.addCopyDirectory(b.path("src/common"), "common", .{});
-        const mod_file = write_files.addCopyFile(b.path("src/" ++ mod_name ++ ".zig"), mod_name ++ ".zig");
-        _ = write_files.addCopyDirectory(b.path("src/" ++ mod_name), mod_name, .{});
+        _ = write_files.addCopyDirectory(b.path("src/" ++ mod_name ++ "_protocol_deps"), "deps", .{});
 
-        const mod = b.addModule(mod_name, .{
-            .root_source_file = mod_file,
-            .target = target,
-            .optimize = optimize,
-        });
-        mod.addAnonymousImport(mod_name ++ "_protocol", .{
+        const protocol = b.createModule(.{
             .root_source_file = output,
             .target = target,
             .optimize = optimize,
+            .imports = &.{
+                .{ .name = "os", .module = os },
+                .{ .name = "common", .module = common },
+            },
         });
 
-        const mod_test = b.addTest(.{ .root_module = mod });
-        const run_test = b.addRunArtifact(mod_test);
+        const mod = b.addModule(mod_name, .{
+            .root_source_file = b.path("src/" ++ mod_name ++ ".zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "os", .module = os },
+                .{ .name = "common", .module = common },
+                .{ .name = mod_name ++ "_protocol", .module = protocol },
+            },
+        });
 
-        test_step.dependOn(&run_test.step);
+        const mod_test = b.addTest(.{
+            .root_module = mod,
+            .target = target,
+            .optimize = optimize,
+            .use_llvm = false,
+            .use_lld = false,
+        });
+
+        const run_mod_test = b.addRunArtifact(mod_test);
+
+        test_step.dependOn(&run_mod_test.step);
     }
 }

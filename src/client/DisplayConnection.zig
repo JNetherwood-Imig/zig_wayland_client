@@ -1,7 +1,7 @@
 gpa: Allocator,
 socket: os.Socket,
 id_allocator: IdAllocator,
-objects: std.ArrayList(Proxy),
+objects: std.ArrayList(wl.Proxy),
 proxy: wl.Display,
 event_queue: EventQueue,
 cancel_pipe: os.Pipe,
@@ -36,7 +36,7 @@ pub fn init(gpa: Allocator, connect_info: anytype) InitError!*DisplayConnection 
     self.gpa = gpa;
     self.socket = try connect(connect_info);
     self.id_allocator = IdAllocator.init(gpa);
-    self.objects = try std.ArrayList(Proxy).initCapacity(gpa, 4);
+    self.objects = try std.ArrayList(wl.Proxy).initCapacity(gpa, 4);
     self.proxy = wl.Display{
         .proxy = .{
             .id = 1,
@@ -165,22 +165,48 @@ fn recieveEvent(self: *DisplayConnection) !void {
 
     const proxy = for (self.objects.items) |obj| {
         if (obj.id == head.object) break obj;
-    } else unreachable;
+    } else {
+        std.debug.print("Could not find object id {d}\n", .{head.object});
+        std.debug.print("Have ids:\n", .{});
+        for (self.objects.items) |obj| {
+            std.debug.print("\t{d}\n", .{obj.id});
+        }
+        unreachable;
+    };
 
     const event = try proxy.parseEvent(head);
-    self.event_queue.emplace(event);
+    switch (event) {
+        .display_error => |err| {
+            std.debug.panic("wl_display_error\n\tobject_id: {d}\n\tcode: {s}\n\tmessage: {s}\n", .{
+                err.object_id,
+                @tagName(@as(wl.Display.Error, @enumFromInt(err.code))),
+                err.message,
+            });
+        },
+        .display_delete_id => |delete_id| {
+            std.debug.print("RECIEVED DELETE ID ({d})\n", .{delete_id.id});
+            for (self.objects.items, 0..) |obj, i| {
+                if (obj.id == delete_id.id) {
+                    _ = self.objects.swapRemove(i);
+                    try self.id_allocator.free(obj.id);
+                    return;
+                }
+            }
+        },
+        else => self.event_queue.emplace(event),
+    }
 }
 
 const DisplayConnection = @This();
 
 const std = @import("std");
 const wl = @import("client_protocol");
-const os = @import("../os.zig");
-const m = @import("../common/message_utils.zig");
-const IdAllocator = @import("../common/IdAllocator.zig");
-const Proxy = @import("Proxy.zig");
-const EventQueue = @import("EventQueue.zig");
+const os = @import("os");
+const common = @import("common");
+const m = common.message_utils;
 const testing = std.testing;
 const roundup4 = m.roundup4;
+const IdAllocator = common.IdAllocator;
+const EventQueue = @import("EventQueue.zig");
 const Allocator = std.mem.Allocator;
 const Header = m.Header;

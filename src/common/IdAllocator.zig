@@ -71,7 +71,7 @@ test "allocate" {
 
 pub const ReplaceError = Allocator.Error;
 
-pub fn replace(self: *IdAllocator, id: u32) ReplaceError!void {
+pub fn free(self: *IdAllocator, id: u32) ReplaceError!void {
     self.mutex.lock();
     defer self.mutex.unlock();
     if (id == self.next_client - 1) {
@@ -85,7 +85,7 @@ pub fn replace(self: *IdAllocator, id: u32) ReplaceError!void {
     }
 }
 
-test "replace" {
+test "free" {
     var alloc = IdAllocator.init(std.testing.allocator);
     defer alloc.deinit();
 
@@ -95,12 +95,12 @@ test "replace" {
     try testing.expectEqual(@as(u32, 2), client2);
     try testing.expectEqual(@as(u32, 3), client3);
 
-    try alloc.replace(client3);
+    try alloc.free(client3);
     const client4 = try alloc.allocate(.client);
 
     try testing.expectEqual(@as(u32, 3), client4);
 
-    try alloc.replace(client2);
+    try alloc.free(client2);
     const client5 = try alloc.allocate(.client);
 
     try testing.expectEqual(@as(u32, 2), client5);

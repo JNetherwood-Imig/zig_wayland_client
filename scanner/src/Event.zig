@@ -80,5 +80,14 @@ pub fn write(self: Self, writer: std.fs.File.Writer) !void {
     try writer.print("\tpub const {s}Event = struct {{\n", .{self.type_name});
     try writer.print("\t\tself: {s},\n", .{self.interface.type_name});
     for (self.args.items) |arg| try arg.write(writer);
+    try writer.writeAll(
+        \\        pub fn deinit(self: @This()) void {
+        \\            inline for (@typeInfo(@This()).@"struct".fields) |field| {
+        \\                if (field.type == []const u8 or field.type == [:0]const u8)
+        \\                    self.self.proxy.gpa.free(@field(self, field.name));
+        \\            }
+        \\        }
+        \\
+    );
     try writer.print("\t}};\n", .{});
 }

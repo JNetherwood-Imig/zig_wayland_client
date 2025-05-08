@@ -30,8 +30,8 @@ pub fn init(allocator: std.mem.Allocator, mode: Mode) Self {
 
 pub fn deinit(self: Self) void {
     if (self.out_file) |f| f.close();
-    for (self.protocols.items) |protocol| protocol.deinit();
     self.dependencies.deinit();
+    for (self.protocols.items) |protocol| protocol.deinit();
     self.protocols.deinit();
     self.files.deinit();
 }
@@ -48,6 +48,7 @@ pub fn writeProtocols(self: *Self) !void {
 }
 
 fn writeClientProtocols(self: *Self) !void {
+    try self.writer.writeAll("pub const Proxy = @import(\"deps/Proxy.zig\");\n");
     for (self.files.items) |file| {
         const protocol = try Protocol.init(self.allocator, file);
         try self.protocols.append(protocol);
@@ -92,6 +93,14 @@ fn writeClientProtocols(self: *Self) !void {
             }
         }
     }
+    try event_writer.writeAll(
+        \\    pub fn deinit(self: @This()) void {
+        \\        switch (self) {
+        \\            inline else => |child| child.deinit(),
+        \\        }
+        \\    }
+        \\
+    );
     try event_writer.print("}};\n", .{});
 
     try self.writer.print("pub usingnamespace @import(\"event.zig\");\n", .{});

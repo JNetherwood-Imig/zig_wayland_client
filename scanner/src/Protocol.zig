@@ -136,10 +136,10 @@ pub fn writeClient(self: Self, deps: []const DependencyInfo) !void {
     try self.printDescription(writer);
 
     const protocol_header =
-        \\const File = @import("os.zig").File;
-        \\const Fixed = @import("common/Fixed.zig");
-        \\const Proxy = @import("client/Proxy.zig");
-        \\const GenericNewId = Proxy.GenericNewId;
+        \\const File = @import("os").File;
+        \\const Fixed = @import("common").Fixed;
+        \\const Proxy = @import("deps/Proxy.zig");
+        \\const GenericNewId = @import("common").message_utils.GenericNewId;
         \\
     ;
     try writer.writeAll(protocol_header);
