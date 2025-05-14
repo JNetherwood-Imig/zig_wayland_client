@@ -10,21 +10,14 @@ writer: std.fs.File.Writer,
 files: std.ArrayList(std.fs.File),
 protocols: std.ArrayList(Protocol),
 dependencies: std.ArrayList(DependencyInfo),
-mode: Mode,
 
-pub const Mode = enum(u1) {
-    client,
-    server,
-};
-
-pub fn init(allocator: std.mem.Allocator, mode: Mode) Self {
+pub fn init(allocator: std.mem.Allocator) Self {
     return .{
         .allocator = allocator,
         .files = std.ArrayList(std.fs.File).init(allocator),
         .protocols = std.ArrayList(Protocol).init(allocator),
         .writer = std.io.getStdOut().writer(),
         .dependencies = std.ArrayList(DependencyInfo).init(allocator),
-        .mode = mode,
     };
 }
 
@@ -41,14 +34,6 @@ pub fn addFile(self: *Self, file: std.fs.File) !void {
 }
 
 pub fn writeProtocols(self: *Self) !void {
-    switch (self.mode) {
-        .client => try writeClientProtocols(self),
-        .server => try writeServerProtocols(self),
-    }
-}
-
-fn writeClientProtocols(self: *Self) !void {
-    try self.writer.writeAll("pub const Proxy = @import(\"deps/Proxy.zig\");\n");
     for (self.files.items) |file| {
         const protocol = try Protocol.init(self.allocator, file);
         try self.protocols.append(protocol);
@@ -105,24 +90,7 @@ fn writeClientProtocols(self: *Self) !void {
 
     try self.writer.print("pub usingnamespace @import(\"event.zig\");\n", .{});
 
-    for (self.protocols.items) |protocol| try protocol.writeClient(self.dependencies.items);
-}
-
-fn writeServerProtocols(self: *Self) !void {
-    _ = self;
-    // for (self.files.items) |file| {
-    //     const protocol = try Protocol.init(self.allocator, file);
-    //     try self.protocols.append(protocol);
-    //     for (protocol.interfaces.items) |interface| try self.dependencies.append(DependencyInfo{
-    //         .interface = interface.type_name,
-    //         .protocol = protocol.name,
-    //     });
-    // }
-
-    // for (self.protocols.items) |*protocol| {
-    //     try protocol.finalize();
-    //     try self.writer.print("pub usingnamespace @import(\"{s}.zig\");\n", .{protocol.name});
-    // }
+    for (self.protocols.items) |protocol| try protocol.write(self.dependencies.items);
 }
 
 pub const DependencyInfo = struct {

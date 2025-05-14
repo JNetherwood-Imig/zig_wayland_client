@@ -1,11 +1,10 @@
 gpa: Allocator,
 socket: os.Socket,
-id_allocator: IdAllocator,
-objects: std.ArrayList(wl.Proxy),
-proxy: wl.Display,
+proxy_manager: ProxyManager,
 event_queue: EventQueue,
 cancel_pipe: os.Pipe,
 event_thread: std.Thread,
+proxy: wl.Display,
 
 pub const ConnectInfo = union(enum) {
     socket: i32,
@@ -27,6 +26,7 @@ pub fn getConnectInfo() GetConnectInfoError!ConnectInfo {
 pub const InitError = Allocator.Error ||
     ConnectError ||
     os.Pipe.CreateError ||
+    ProxyManager.GetProxyError ||
     std.Thread.SpawnError;
 
 pub fn init(gpa: Allocator, connect_info: anytype) InitError!*DisplayConnection {
@@ -35,22 +35,13 @@ pub fn init(gpa: Allocator, connect_info: anytype) InitError!*DisplayConnection 
 
     self.gpa = gpa;
     self.socket = try connect(connect_info);
-    self.id_allocator = IdAllocator.init(gpa);
-    self.objects = try std.ArrayList(wl.Proxy).initCapacity(gpa, 4);
+    self.proxy_manager = ProxyManager.init(gpa, self.socket.handle);
     self.proxy = wl.Display{
-        .proxy = .{
-            .id = 1,
-            .event0_index = 0,
-            .socket = self.socket.handle,
-            .id_allocator = &self.id_allocator,
-            .object_list = &self.objects,
-            .gpa = gpa,
-        },
+        .proxy = try self.proxy_manager.getNewProxy(wl.Display),
     };
     self.event_queue = EventQueue.init();
     self.cancel_pipe = try os.Pipe.create();
     self.event_thread = try std.Thread.spawn(.{ .allocator = self.gpa }, pollEvents, .{self});
-    try self.objects.append(self.proxy.proxy);
 
     return self;
 }
@@ -61,9 +52,8 @@ pub fn deinit(self: *DisplayConnection) void {
     self.event_thread.join();
     self.cancel_pipe.close();
     self.event_queue.deinit();
-    self.id_allocator.deinit();
+    self.proxy_manager.deinit();
     self.socket.close();
-    self.objects.deinit();
     self.gpa.destroy(self);
 }
 
@@ -163,18 +153,7 @@ fn recieveEvent(self: *DisplayConnection) !void {
     var head: Header = undefined;
     _ = try self.socket.handle.read(std.mem.asBytes(&head));
 
-    const proxy = for (self.objects.items) |obj| {
-        if (obj.id == head.object) break obj;
-    } else {
-        std.debug.print("Could not find object id {d}\n", .{head.object});
-        std.debug.print("Have ids:\n", .{});
-        for (self.objects.items) |obj| {
-            std.debug.print("\t{d}\n", .{obj.id});
-        }
-        unreachable;
-    };
-
-    const event = try proxy.parseEvent(head);
+    const event = try self.parseEvent(head);
     switch (event) {
         .display_error => |err| {
             std.debug.panic("wl_display_error\n\tobject_id: {d}\n\tcode: {s}\n\tmessage: {s}\n", .{
@@ -183,30 +162,97 @@ fn recieveEvent(self: *DisplayConnection) !void {
                 err.message,
             });
         },
-        .display_delete_id => |delete_id| {
-            std.debug.print("RECIEVED DELETE ID ({d})\n", .{delete_id.id});
-            for (self.objects.items, 0..) |obj, i| {
-                if (obj.id == delete_id.id) {
-                    _ = self.objects.swapRemove(i);
-                    try self.id_allocator.free(obj.id);
-                    return;
-                }
-            }
-        },
+        .display_delete_id => |delete_id| try self.proxy_manager.deleteId(delete_id.id),
         else => self.event_queue.emplace(event),
     }
+}
+
+pub fn parseEvent(self: *DisplayConnection, header: Header) !wl.Event {
+    const event0_index = self.proxy_manager.proxy_type_references.items[header.object];
+    const tag_name = @tagName(@as(wl.EventType, @enumFromInt(event0_index + header.opcode)));
+    inline for (@typeInfo(wl.Event).@"union".fields) |field| {
+        if (std.mem.eql(u8, field.name, tag_name)) {
+            const union_field_info = field;
+            const struct_type = union_field_info.type;
+            var struct_value: struct_type = undefined;
+            struct_value.self = .{ .proxy = .{
+                .id = header.object,
+                .gpa = self.gpa,
+                .event0_index = event0_index,
+                .manager = &self.proxy_manager,
+                .socket = self.socket.handle,
+            } };
+
+            const fd_count = count: {
+                comptime var count: usize = 0;
+                inline for (@typeInfo(struct_type).@"struct".fields) |s_field| {
+                    if (@TypeOf(s_field) == os.File) count += 1;
+                }
+                break :count count;
+            };
+
+            const buf = try self.gpa.alloc(u8, header.length - @sizeOf(Header));
+            defer self.gpa.free(buf);
+
+            var fds: [fd_count]os.File = undefined;
+            _ = try self.socket.handle.recieveMessage(@TypeOf(fds), &fds, buf, 0);
+
+            var index: usize = 0;
+            var fd_idx: usize = 0;
+
+            inline for (@typeInfo(struct_type).@"struct".fields) |s_field| {
+                if (comptime std.mem.eql(u8, s_field.name, "self")) continue;
+                switch (s_field.type) {
+                    u32 => {
+                        @field(struct_value, s_field.name) = std.mem.bytesToValue(u32, buf[index .. index + 4]);
+                        index += 4;
+                    },
+                    i32 => {
+                        @field(struct_value, s_field.name) = std.mem.bytesToValue(i32, buf[index .. index + 4]);
+                        index += 4;
+                    },
+                    Array => {
+                        const len = std.mem.bytesToValue(u32, buf[index .. index + 4]);
+                        index += 4;
+                        const rounded_len = roundup4(len);
+                        @field(struct_value, s_field.name) = try self.gpa.dupe(u8, buf[index .. index + len]);
+                        index += rounded_len;
+                    },
+                    String => {
+                        const len = std.mem.bytesToValue(u32, buf[index .. index + 4]);
+                        index += 4;
+                        const rounded_len = roundup4(len);
+                        @field(struct_value, s_field.name) = try self.gpa.dupeZ(u8, buf[index .. index + len - 1]);
+                        index += rounded_len;
+                    },
+                    os.File => {
+                        if (fd_count > 0) {
+                            @field(struct_value, s_field.name) = fds[fd_idx];
+                            fd_idx += 1;
+                        }
+                    },
+                    else => std.debug.panic("Unexpected type: {s}", .{@typeName(s_field.type)}),
+                }
+            }
+            return @unionInit(wl.Event, union_field_info.name, struct_value);
+        }
+    }
+    unreachable;
 }
 
 const DisplayConnection = @This();
 
 const std = @import("std");
-const wl = @import("client_protocol");
+const wl = @import("wayland_client_protocol");
 const os = @import("os");
-const common = @import("common");
-const m = common.message_utils;
+const core = @import("core");
+const m = core.message_utils;
 const testing = std.testing;
 const roundup4 = m.roundup4;
-const IdAllocator = common.IdAllocator;
+const ProxyManager = core.ProxyManager;
+const Proxy = core.Proxy;
 const EventQueue = @import("EventQueue.zig");
 const Allocator = std.mem.Allocator;
 const Header = m.Header;
+const Array = m.Array;
+const String = m.String;

@@ -125,7 +125,7 @@ pub fn finalize(self: *Self) !void {
     }
 }
 
-pub fn writeClient(self: Self, deps: []const DependencyInfo) !void {
+pub fn write(self: Self, deps: []const DependencyInfo) !void {
     var buf: [64]u8 = undefined;
     const out_path = try std.fmt.bufPrint(&buf, "{s}.zig", .{self.name});
     const out_file = try std.fs.cwd().createFile(out_path, .{});
@@ -137,9 +137,10 @@ pub fn writeClient(self: Self, deps: []const DependencyInfo) !void {
 
     const protocol_header =
         \\const File = @import("os").File;
-        \\const Fixed = @import("common").Fixed;
-        \\const Proxy = @import("deps/Proxy.zig");
-        \\const GenericNewId = @import("common").message_utils.GenericNewId;
+        \\const core = @import("core");
+        \\const Fixed = core.Fixed;
+        \\const Proxy = core.Proxy;
+        \\const GenericNewId = core.message_utils.GenericNewId;
         \\
     ;
     try writer.writeAll(protocol_header);
@@ -159,14 +160,6 @@ pub fn writeClient(self: Self, deps: []const DependencyInfo) !void {
     for (self.interfaces.items) |interface| {
         try interface.write(writer);
     }
-}
-
-pub fn writeServer(self: Self, deps: []const DependencyInfo) !void {
-    _ = deps;
-    var buf: [64]u8 = undefined;
-    const out_path = try std.fmt.bufPrint(&buf, "{s}.zig", .{self.name});
-    const out_file = try std.fs.cwd().createFile(out_path, .{});
-    defer out_file.close();
 }
 
 fn printCopyright(self: Self, writer: std.fs.File.Writer) !void {

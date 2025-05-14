@@ -1,5 +1,12 @@
 pub const String = [:0]const u8;
+
 pub const Array = []const u8;
+
+pub const Header = packed struct {
+    object: u32,
+    opcode: u16,
+    length: u16,
+};
 
 pub const GenericNewId = struct {
     interface: String,
@@ -25,11 +32,5 @@ test "roundup4" {
     try testing.expectEqual(@as(usize, 12), roundup4(usize_9));
     try testing.expectEqual(@as(i8, 12), roundup4(i8_12));
 }
-
-pub const Header = packed struct {
-    object: u32,
-    opcode: u16,
-    length: u16,
-};
 
 const testing = @import("std").testing;

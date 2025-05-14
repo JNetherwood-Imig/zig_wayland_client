@@ -134,9 +134,9 @@ fn printConstructorArgs(self: Self, writer: std.fs.File.Writer) !void {
 
     try writer.print("\t) !{s} {{\n", .{return_type});
 
-    try writer.print("\t\tconst new_id = try self.proxy.id_allocator.allocate(.client);\n", .{});
+    try writer.print("\t\tconst new_proxy = try self.proxy.manager.getNewProxy({s});\n", .{return_type});
     try writer.print(
-        "\t\treturn self.proxy.marshalCreateArgs({s}, {d}, new_id, {d}, .{{\n",
+        "\t\treturn self.proxy.marshalCreateArgs({s}, {d}, new_proxy, {d}, .{{\n",
         .{ return_type, self.fd_count, self.opcode },
     );
     for (self.args.items) |arg| {
@@ -145,10 +145,10 @@ fn printConstructorArgs(self: Self, writer: std.fs.File.Writer) !void {
                 try writer.print("\t\t\tGenericNewId{{\n", .{});
                 try writer.print("\t\t\t\t.interface = Interface.interface,\n", .{});
                 try writer.print("\t\t\t\t.version = version,\n", .{});
-                try writer.print("\t\t\t\t.id = new_id,\n", .{});
+                try writer.print("\t\t\t\t.id = new_proxy.id,\n", .{});
                 try writer.print("\t\t\t}},\n", .{});
             } else {
-                try writer.print("\t\t\tnew_id,\n", .{});
+                try writer.print("\t\t\tnew_proxy.id,\n", .{});
             }
             continue;
         }
