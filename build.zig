@@ -10,23 +10,35 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     }).artifact("scanner");
 
-    const files = b.option(
+    const generate_files = b.addWriteFiles();
+
+    const run_scanner = b.addRunArtifact(scanner);
+    run_scanner.setCwd(generate_files.getDirectory());
+    const generated = run_scanner.addPrefixedOutputFileArg("-o", "generated.zig");
+
+    const extensions = b.option(
         []const LazyPath,
-        "files",
-        "A list of wayland protocol xml files.",
+        "extensions",
+        "A list of paths to valid wayland protocol extension xml files.",
     );
 
-    const dirs = b.option(
-        []const LazyPath,
-        "dirs",
-        "A list of directories containing wayland protocol xml files.",
-    );
-
-    const core_path = b.option(
+    const wayland_xml_path = b.option(
         LazyPath,
         "wayland_xml_path",
-        "Optional override path to the core wayland.xml file",
+        "Override path to the wayland.xml file.",
     );
+
+    if (wayland_xml_path) |path| {
+        run_scanner.addPrefixedFileArg("-o", path);
+    }
+
+    if (extensions) |e| for (e) |extension| {
+        run_scanner.addPrefixedFileArg("-e", extension);
+    };
+
+    const write_files = b.addWriteFiles();
+    const output = write_files.addCopyFile(generated, "client_protocol.zig");
+    _ = write_files.addCopyDirectory(generate_files.getDirectory(), "", .{});
 
     const os = b.createModule(.{
         .root_source_file = b.path("src/os.zig"),
@@ -34,16 +46,8 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    const os_test = b.addTest(.{
-        .root_module = os,
-        .use_llvm = false,
-        .use_lld = false,
-    });
-
-    const run_os_test = b.addRunArtifact(os_test);
-
-    const common = b.createModule(.{
-        .root_source_file = b.path("src/common.zig"),
+    const core = b.createModule(.{
+        .root_source_file = b.path("src/core.zig"),
         .target = target,
         .optimize = optimize,
         .imports = &.{
@@ -51,72 +55,57 @@ pub fn build(b: *std.Build) void {
         },
     });
 
-    const common_test = b.addTest(.{
-        .root_module = common,
+    const wayland_client_protocol = b.createModule(.{
+        .root_source_file = output,
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "os", .module = os },
+            .{ .name = "core", .module = core },
+        },
+    });
+
+    const wayland_client = b.addModule("wayland_client", .{
+        .root_source_file = b.path("src/wayland_client.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "os", .module = os },
+            .{ .name = "core", .module = core },
+            .{ .name = "wayland_client_protocol", .module = wayland_client_protocol },
+        },
+    });
+
+    const os_test = b.addTest(.{
+        .root_module = os,
+        .target = target,
+        .optimize = optimize,
         .use_llvm = false,
         .use_lld = false,
     });
 
-    const run_common_test = b.addRunArtifact(common_test);
+    const core_test = b.addTest(.{
+        .root_module = core,
+        .target = target,
+        .optimize = optimize,
+        .use_llvm = false,
+        .use_lld = false,
+    });
+
+    const wayland_client_test = b.addTest(.{
+        .root_module = wayland_client,
+        .target = target,
+        .optimize = optimize,
+        .use_llvm = false,
+        .use_lld = false,
+    });
+
+    const run_os_test = b.addRunArtifact(os_test);
+    const run_core_test = b.addRunArtifact(core_test);
+    const run_wayland_client_test = b.addRunArtifact(wayland_client_test);
 
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_os_test.step);
-    test_step.dependOn(&run_common_test.step);
-
-    inline for ([_][]const u8{ "client", "server" }) |mod_name| {
-        const generate_files = b.addWriteFiles();
-
-        const run_scanner = b.addRunArtifact(scanner);
-        run_scanner.setCwd(generate_files.getDirectory());
-        run_scanner.addArg(mod_name);
-        const generated = run_scanner.addPrefixedOutputFileArg("-o", "generated.zig");
-
-        if (core_path) |path| run_scanner.addPrefixedFileArg("-c", path);
-
-        if (files) |f| for (f) |file| {
-            run_scanner.addPrefixedFileArg("-f", file);
-        };
-
-        if (dirs) |d| for (d) |dir| {
-            run_scanner.addPrefixedDirectoryArg("-d", dir);
-        };
-
-        const write_files = b.addWriteFiles();
-        const output = write_files.addCopyFile(generated, mod_name ++ "_protocol.zig");
-        _ = write_files.addCopyDirectory(generate_files.getDirectory(), "", .{});
-        _ = write_files.addCopyDirectory(b.path("src/" ++ mod_name ++ "_protocol_deps"), "deps", .{});
-
-        const protocol = b.createModule(.{
-            .root_source_file = output,
-            .target = target,
-            .optimize = optimize,
-            .imports = &.{
-                .{ .name = "os", .module = os },
-                .{ .name = "common", .module = common },
-            },
-        });
-
-        const mod = b.addModule(mod_name, .{
-            .root_source_file = b.path("src/" ++ mod_name ++ ".zig"),
-            .target = target,
-            .optimize = optimize,
-            .imports = &.{
-                .{ .name = "os", .module = os },
-                .{ .name = "common", .module = common },
-                .{ .name = mod_name ++ "_protocol", .module = protocol },
-            },
-        });
-
-        const mod_test = b.addTest(.{
-            .root_module = mod,
-            .target = target,
-            .optimize = optimize,
-            .use_llvm = false,
-            .use_lld = false,
-        });
-
-        const run_mod_test = b.addRunArtifact(mod_test);
-
-        test_step.dependOn(&run_mod_test.step);
-    }
+    test_step.dependOn(&run_core_test.step);
+    test_step.dependOn(&run_wayland_client_test.step);
 }
