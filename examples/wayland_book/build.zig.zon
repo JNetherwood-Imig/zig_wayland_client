@@ -1,0 +1,22 @@
+.{
+    .name = .wayland_book,
+    .version = "0.0.1",
+    .minimum_zig_version = "0.14.0",
+    .fingerprint = 0xe19c5e882e9a61b,
+
+    .dependencies = .{
+        .wayland_client = .{
+            .path = "../..",
+        },
+        .shared_memory = .{
+            .url = "git+https://github.com/Peter-Barrow/shared-memory-zig.git#7dc0f7516f6d498148bf145e7649c2d9c3dddc75",
+            .hash = "shared_memory-0.3.0-5YGFvOTCAABV3DPQIQqsU4xNezk6Aa6VruPEK1nINxuy",
+        },
+    },
+
+    .paths = .{
+        "build.zig.zon",
+        "build.zig",
+        "src",
+    },
+}
