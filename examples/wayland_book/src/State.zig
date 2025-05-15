@@ -44,15 +44,7 @@ pub fn init(gpa: std.mem.Allocator) !State {
                 continue;
             }
         },
-        .callback_done => break,
-        else => unreachable,
-    };
-
-    _ = try self.display.sync();
-    while (self.display.waitNextEvent()) |ev| switch (ev) {
-        .shm_format => {},
-        .callback_done => break,
-        else => std.debug.panic("Unexpected ev: {s}", .{@tagName(ev)}),
+        else => break,
     };
 
     try self.resizePixelBuffer();
@@ -67,26 +59,31 @@ pub fn init(gpa: std.mem.Allocator) !State {
 }
 
 pub fn run(self: *State) !void {
-    while (self.display.waitNextEvent()) |ev| switch (ev) {
-        .callback_done => try self.frame_new(),
-        .xdg_toplevel_wm_capabilities => {},
-        .xdg_toplevel_configure => |conf| {
-            if (conf.width == 0 and conf.height == 0) continue;
-            if (self.width != conf.width or self.height != conf.height) {
-                std.posix.munmap(self.pixels);
-                self.width = @intCast(conf.width);
-                self.height = @intCast(conf.height);
-                try self.resizePixelBuffer();
-            }
-        },
-        .xdg_surface_configure => |conf| {
-            try self.xdg_surface.ackConfigure(conf.serial);
-            if (self.pixels.len == 0) try self.resizePixelBuffer();
-            try self.draw();
-        },
-        .surface_preferred_buffer_scale => {},
-        else => std.debug.panic("Unexpected event: {s}", .{@tagName(ev)}),
-    };
+    while (self.display.waitNextEvent()) |ev| {
+        defer ev.deinit();
+        switch (ev) {
+            .callback_done => try self.frame_new(),
+            .xdg_toplevel_configure => |conf| {
+                if (conf.width == 0 and conf.height == 0) continue;
+                if (self.width != conf.width or self.height != conf.height) {
+                    std.posix.munmap(self.pixels);
+                    self.width = @intCast(conf.width);
+                    self.height = @intCast(conf.height);
+                    try self.resizePixelBuffer();
+                }
+            },
+            .xdg_surface_configure => |conf| {
+                try self.xdg_surface.ackConfigure(conf.serial);
+                if (self.pixels.len == 0) try self.resizePixelBuffer();
+                try self.draw();
+            },
+            .xdg_wm_base_ping => |ping| {
+                try self.xdg_shell.pong(ping.serial);
+            },
+            .xdg_toplevel_close => break,
+            else => {},
+        }
+    }
 }
 
 pub fn deinit(self: State) void {
@@ -105,7 +102,6 @@ fn allocateShmFile(size: usize) !wl.os.File {
 
 fn resizePixelBuffer(self: *State) !void {
     const size: usize = @as(usize, self.width) * @as(usize, self.height) * 4;
-    std.debug.print("size is {d} ({d} x {d} x 4)\n", .{ size, self.width, self.height });
     const fd = try allocateShmFile(size);
     self.pixels = try std.posix.mmap(
         null,
