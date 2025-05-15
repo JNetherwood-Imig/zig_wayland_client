@@ -170,6 +170,7 @@ fn recieveEvent(self: *DisplayConnection) !void {
 pub fn parseEvent(self: *DisplayConnection, header: Header) !wl.Event {
     const event0_index = self.proxy_manager.proxy_type_references.items[header.object];
     const tag_name = @tagName(@as(wl.EventType, @enumFromInt(event0_index + header.opcode)));
+    @setEvalBranchQuota(2048);
     inline for (@typeInfo(wl.Event).@"union".fields) |field| {
         if (std.mem.eql(u8, field.name, tag_name)) {
             const union_field_info = field;
@@ -183,6 +184,8 @@ pub fn parseEvent(self: *DisplayConnection, header: Header) !wl.Event {
                 .socket = self.socket.handle,
             } };
 
+            const size = header.length - @sizeOf(Header);
+
             const fd_count = count: {
                 comptime var count: usize = 0;
                 inline for (@typeInfo(struct_type).@"struct".fields) |s_field| {
@@ -191,11 +194,14 @@ pub fn parseEvent(self: *DisplayConnection, header: Header) !wl.Event {
                 break :count count;
             };
 
-            const buf = try self.gpa.alloc(u8, header.length - @sizeOf(Header));
+            const buf = try self.gpa.alloc(u8, size);
             defer self.gpa.free(buf);
 
             var fds: [fd_count]os.File = undefined;
-            _ = try self.socket.handle.recieveMessage(@TypeOf(fds), &fds, buf, 0);
+            if (size != 0) {
+                const read = try self.socket.handle.recieveMessage(@TypeOf(fds), &fds, buf, 0);
+                std.debug.assert(read == size);
+            }
 
             var index: usize = 0;
             var fd_idx: usize = 0;
@@ -233,10 +239,7 @@ pub fn parseEvent(self: *DisplayConnection, header: Header) !wl.Event {
                     },
                     else => switch (@typeInfo(s_field.type)) {
                         .@"enum" => {
-                            @field(struct_value, s_field.name) = @enumFromInt(std.mem.bytesToValue(
-                                u32,
-                                buf[index .. index + 4],
-                            ));
+                            @field(struct_value, s_field.name) = @enumFromInt(std.mem.bytesToValue(u32, buf[index .. index + 4]));
                             index += 4;
                         },
                         else => std.debug.panic("Unexpected type: {s}", .{@typeName(s_field.type)}),

@@ -376,6 +376,12 @@ pub const File = packed struct(i32) {
         };
     }
 
+    // pub fn recieveMessage(self: File, comptime T: type, out_data: *T, buf: []u8, flags: u32) !usize {
+    //     _ = out_data;
+    //     _ = flags;
+    //     return self.read(buf);
+    // }
+
     pub fn recieveMessage(self: File, comptime T: type, out_data: *T, buf: []u8, flags: u32) !usize {
         var iov = std.posix.iovec{ .base = buf.ptr, .len = buf.len };
         var cmsg_buf = [_]u8{0} ** (@sizeOf(CmsgHdr) + @sizeOf(T));

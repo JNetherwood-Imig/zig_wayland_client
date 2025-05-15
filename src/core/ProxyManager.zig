@@ -31,7 +31,13 @@ pub fn getNewProxy(self: *ProxyManager, comptime Interface: type) GetProxyError!
     defer self.mutex.unlock();
     return Proxy{
         .gpa = self.gpa,
-        .id = self.free_list.removeOrNull() orelse id: {
+        .id = id1: {
+            if (self.free_list.removeOrNull()) |id| {
+                self.proxy_type_references.items[id] = Interface.event0_index;
+                break :id1 id;
+            }
+            break :id1 null;
+        } orelse id: {
             if (self.next_id > max_id)
                 return error.IdsExhausted;
             defer self.next_id += 1;
@@ -52,11 +58,7 @@ pub const DeleteIdError = Allocator.Error;
 pub fn deleteId(self: *ProxyManager, id: u32) DeleteIdError!void {
     self.mutex.lock();
     defer self.mutex.unlock();
-    if (id == self.next_id - 1) {
-        self.next_id = id;
-    } else {
-        try self.free_list.add(id);
-    }
+    try self.free_list.add(id);
 }
 
 const ProxyManager = @This();
