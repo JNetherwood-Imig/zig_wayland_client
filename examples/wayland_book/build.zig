@@ -18,7 +18,6 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
             .imports = &.{
                 .{ .name = "wayland_client", .module = wayland_client.module("wayland_client") },
-                .{ .name = "shm", .module = b.dependency("shared_memory", .{}).module("shared_memory") },
             },
         }),
     });
