@@ -394,7 +394,7 @@ pub const File = packed struct(i32) {
                 out_data.* = std.mem.bytesToValue(T, cmsg_buf[@sizeOf(CmsgHdr)..]);
                 break :ret @intCast(ret);
             },
-            else => unreachable,
+            else => |err| std.debug.panic("recieveMessage error: {s}", .{@tagName(err)}),
         };
     }
 
@@ -417,8 +417,8 @@ pub const File = packed struct(i32) {
             .level = sol_rights,
             .type = @intFromEnum(cmsg_type),
         };
-        @as(*CmsgHdr, @ptrCast(@alignCast(&buf[0]))).* = head;
-        @as(*T, @ptrCast(@alignCast(&buf[@sizeOf(CmsgHdr)]))).* = data;
+        @memcpy(buf[0..@sizeOf(CmsgHdr)], std.mem.asBytes(&head));
+        @memcpy(buf[@sizeOf(CmsgHdr)..], std.mem.asBytes(&data));
     }
 
     const FcntlCommand = enum(u32) {

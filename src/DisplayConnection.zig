@@ -231,7 +231,16 @@ pub fn parseEvent(self: *DisplayConnection, header: Header) !wl.Event {
                             fd_idx += 1;
                         }
                     },
-                    else => std.debug.panic("Unexpected type: {s}", .{@typeName(s_field.type)}),
+                    else => switch (@typeInfo(s_field.type)) {
+                        .@"enum" => {
+                            @field(struct_value, s_field.name) = @enumFromInt(std.mem.bytesToValue(
+                                u32,
+                                buf[index .. index + 4],
+                            ));
+                            index += 4;
+                        },
+                        else => std.debug.panic("Unexpected type: {s}", .{@typeName(s_field.type)}),
+                    },
                 }
             }
             return @unionInit(wl.Event, union_field_info.name, struct_value);

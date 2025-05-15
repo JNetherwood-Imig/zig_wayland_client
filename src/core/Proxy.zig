@@ -51,7 +51,18 @@ fn calculateArgsLen(args: anytype) usize {
             GenericNewId => 12 + roundup4(field.interface.len + 1),
             Array => 4 + roundup4(field.len),
             os.File => 0,
-            else => unreachable,
+            else => switch (@typeInfo(field_info.type)) {
+                .@"enum" => 4,
+                .@"struct" => size: {
+                    comptime std.debug.assert(@hasField(field_info.type, "proxy"));
+                    break :size 4;
+                },
+                .optional => |opt| size: {
+                    comptime std.debug.assert(@hasField(opt.child, "proxy"));
+                    break :size 4;
+                },
+                else => std.debug.panic("Unexpected arg type: {s}", .{@typeName(field_info.type)}),
+            },
         };
     }
     return len;
@@ -175,7 +186,18 @@ fn serializeArgs(buf: []u8, fds: []os.File, args: anytype) void {
             os.File => {
                 write_fds = serializeFd(write_fds, field);
             },
-            else => unreachable,
+            else => switch (@typeInfo(field_info.type)) {
+                .@"enum" => write_buf = serializeUint(write_buf, @intFromEnum(field)),
+                .@"struct" => write_buf = serializeUint(write_buf, field.proxy.id),
+                .optional => {
+                    const id = id: {
+                        if (field) |f| break :id f.proxy.id;
+                        break :id 0;
+                    };
+                    write_buf = serializeUint(write_buf, id);
+                },
+                else => unreachable,
+            },
         }
     }
 }
