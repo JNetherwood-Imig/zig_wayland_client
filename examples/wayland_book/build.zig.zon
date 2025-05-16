@@ -8,6 +8,10 @@
         .wayland_client = .{
             .path = "../..",
         },
+        .xkb = .{
+            .url = "git+https://github.com/ifreund/zig-xkbcommon.git#87e0910e12af79cbb74a37143c881abea32c96b7",
+            .hash = "xkbcommon-0.4.0-dev-VDqIe3a9AQDQa1H4Vh7__mVphznD-7tyNWdnjFgf-9fC",
+        },
     },
 
     .paths = .{

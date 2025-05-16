@@ -9,15 +9,14 @@ pub fn build(b: *std.Build) void {
     });
 
     const exe = b.addExecutable(.{
-        .name = "test",
-        .use_llvm = false,
-        .use_lld = false,
+        .name = "wayland_book",
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/main.zig"),
             .target = target,
             .optimize = optimize,
             .imports = &.{
                 .{ .name = "wayland_client", .module = wayland_client.module("wayland_client") },
+                .{ .name = "xkb", .module = b.dependency("xkb", .{}).module("xkbcommon") },
             },
         }),
     });
