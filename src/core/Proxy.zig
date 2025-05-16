@@ -52,15 +52,7 @@ fn calculateArgsLen(args: anytype) usize {
             Array => 4 + roundup4(field.len),
             os.File => 0,
             else => switch (@typeInfo(field_info.type)) {
-                .@"enum" => 4,
-                .@"struct" => size: {
-                    comptime std.debug.assert(@hasField(field_info.type, "proxy"));
-                    break :size 4;
-                },
-                .optional => |opt| size: {
-                    comptime std.debug.assert(@hasField(opt.child, "proxy"));
-                    break :size 4;
-                },
+                .@"enum", .@"struct", .optional => 4,
                 else => std.debug.panic("Unexpected arg type: {s}", .{@typeName(field_info.type)}),
             },
         };
@@ -188,7 +180,15 @@ fn serializeArgs(buf: []u8, fds: []os.File, args: anytype) void {
             },
             else => switch (@typeInfo(field_info.type)) {
                 .@"enum" => write_buf = serializeUint(write_buf, @intFromEnum(field)),
-                .@"struct" => write_buf = serializeUint(write_buf, field.proxy.id),
+                .@"struct" => |s| { // Bitfield
+                    if (s.layout == .@"packed") {
+                        comptime std.debug.assert(s.backing_integer.? == u32);
+                        write_buf = serializeUint(write_buf, @bitCast(field));
+                    } else { // Object
+                        comptime std.debug.assert(@hasField(field_info.type, "proxy"));
+                        write_buf = serializeUint(write_buf, field.proxy.id);
+                    }
+                },
                 .optional => {
                     const id = id: {
                         if (field) |f| break :id f.proxy.id;

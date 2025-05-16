@@ -3,9 +3,9 @@ mutex: Thread.Mutex,
 condition: Thread.Condition,
 cancelled: bool,
 
-pub fn init() EventQueue {
+pub fn init(gpa: std.mem.Allocator) EventQueue {
     return EventQueue{
-        .queue = Queue.init(),
+        .queue = Queue.init(gpa),
         .mutex = Thread.Mutex{},
         .condition = Thread.Condition{},
         .cancelled = false,
@@ -16,10 +16,10 @@ pub fn deinit(self: EventQueue) void {
     self.queue.deinit();
 }
 
-pub fn emplace(self: *EventQueue, event: wl.Event) void {
+pub fn emplace(self: *EventQueue, event: wl.Event) !void {
     self.mutex.lock();
     defer self.mutex.unlock();
-    self.queue.writeItem(event) catch return;
+    try self.queue.writeItem(event);
     self.condition.signal();
 }
 
@@ -52,5 +52,5 @@ const EventQueue = @This();
 
 const std = @import("std");
 const wl = @import("wayland_client_protocol");
-const Queue = std.fifo.LinearFifo(wl.Event, .{ .Static = 64 });
+const Queue = std.fifo.LinearFifo(wl.Event, .Dynamic);
 const Thread = std.Thread;

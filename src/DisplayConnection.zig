@@ -39,7 +39,7 @@ pub fn init(gpa: Allocator, connect_info: anytype) InitError!*DisplayConnection 
     self.proxy = wl.Display{
         .proxy = try self.proxy_manager.getNewProxy(wl.Display),
     };
-    self.event_queue = EventQueue.init();
+    self.event_queue = EventQueue.init(gpa);
     self.cancel_pipe = try os.Pipe.create();
     self.event_thread = try std.Thread.spawn(.{ .allocator = self.gpa }, pollEvents, .{self});
 
@@ -156,6 +156,7 @@ fn recieveEvent(self: *DisplayConnection) !void {
     const event = try self.parseEvent(head);
     switch (event) {
         .display_error => |err| {
+            defer err.deinit();
             std.debug.panic("wl_display_error\n\tobject_id: {d}\n\tcode: {s}\n\tmessage: {s}\n", .{
                 err.object_id,
                 @tagName(@as(wl.Display.Error, @enumFromInt(err.code))),
@@ -163,7 +164,7 @@ fn recieveEvent(self: *DisplayConnection) !void {
             });
         },
         .display_delete_id => |delete_id| try self.proxy_manager.deleteId(delete_id.id),
-        else => self.event_queue.emplace(event),
+        else => try self.event_queue.emplace(event),
     }
 }
 
@@ -217,6 +218,10 @@ pub fn parseEvent(self: *DisplayConnection, header: Header) !wl.Event {
                         @field(struct_value, s_field.name) = std.mem.bytesToValue(i32, buf[index .. index + 4]);
                         index += 4;
                     },
+                    Fixed => {
+                        @field(struct_value, s_field.name) = Fixed{ .data = @bitCast(std.mem.bytesToValue(i32, buf[index .. index + 4])) };
+                        index += 4;
+                    },
                     Array => {
                         const len = std.mem.bytesToValue(u32, buf[index .. index + 4]);
                         index += 4;
@@ -239,8 +244,33 @@ pub fn parseEvent(self: *DisplayConnection, header: Header) !wl.Event {
                     },
                     else => switch (@typeInfo(s_field.type)) {
                         .@"enum" => {
-                            @field(struct_value, s_field.name) = @enumFromInt(std.mem.bytesToValue(u32, buf[index .. index + 4]));
+                            const int_value: u32 = std.mem.bytesToValue(u32, buf[index .. index + 4]);
+                            @field(struct_value, s_field.name) = @enumFromInt(int_value);
                             index += 4;
+                        },
+                        .@"struct" => |s| {
+                            const int_value = std.mem.bytesToValue(u32, buf[index .. index + 4]);
+                            index += 4;
+                            if (s.layout == .@"packed") { // Bitfield
+                                comptime std.debug.assert(s.backing_integer.? == u32);
+                                var s_value = s_field.type{};
+                                inline for (s.fields, 0..) |f, i| {
+                                    if (f.type == bool)
+                                        @field(s_value, f.name) = int_value & i << i == i << i;
+                                }
+
+                                @field(struct_value, s_field.name) = s_value;
+                            } else { // Object
+                                comptime std.debug.assert(@hasField(s_field.type, "proxy"));
+                                const proxy = Proxy{
+                                    .gpa = self.gpa,
+                                    .id = int_value,
+                                    .event0_index = event0_index,
+                                    .socket = self.socket.handle,
+                                    .manager = &self.proxy_manager,
+                                };
+                                @field(struct_value, s_field.name) = s_field.type{ .proxy = proxy };
+                            }
                         },
                         else => std.debug.panic("Unexpected type: {s}", .{@typeName(s_field.type)}),
                     },
@@ -268,3 +298,4 @@ const Allocator = std.mem.Allocator;
 const Header = m.Header;
 const Array = m.Array;
 const String = m.String;
+const Fixed = core.Fixed;
