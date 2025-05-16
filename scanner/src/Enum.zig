@@ -14,6 +14,19 @@ numeric_since: ?u32 = null,
 is_bitfield: bool = false,
 allocator: std.mem.Allocator,
 
+const ExampleEnum = enum(u32) {
+    value_one = 1,
+    value_two = 2,
+    value_three = 3,
+};
+
+const ExampleBitfield = packed struct(u32) {
+    option_one: bool = false,
+    option_two: bool = false,
+    option_three: bool = false,
+    _: u29 = 0,
+};
+
 pub fn init(allocator: std.mem.Allocator, parser: *Parser) !Self {
     var self = Self{
         .name = undefined,
@@ -34,6 +47,7 @@ pub fn init(allocator: std.mem.Allocator, parser: *Parser) !Self {
         }
         if (std.mem.eql(u8, attrib, "bitfield")) {
             self.bitfield = parser.getNextAttributeValue().?;
+            self.is_bitfield = std.mem.eql(u8, self.bitfield.?, "true");
             continue;
         }
 
@@ -64,9 +78,24 @@ pub fn deinit(self: Self) void {
 
 pub fn write(self: Self, writer: std.fs.File.Writer) !void {
     if (self.description) |description| try description.emit(writer, "\t///");
+    if (self.is_bitfield) {
+        try self.writeBitfield(writer);
+    } else {
+        try self.writeEnum(writer);
+    }
+}
+
+pub fn writeEnum(self: Self, writer: std.fs.File.Writer) !void {
     try writer.print("\tpub const {s} = enum(u32) {{\n", .{self.type_name});
-    for (self.entries.items) |entry| try entry.write(writer);
+    for (self.entries.items) |entry| try entry.writeEnum(writer);
     try writer.print("\t}};\n", .{});
+}
+
+pub fn writeBitfield(self: Self, writer: std.fs.File.Writer) !void {
+    try writer.print("\tpub const {s} = packed struct(u32) {{\n", .{self.type_name});
+    for (self.entries.items) |entry| try entry.writeBitfield(writer);
+    try writer.print("\t\t_: u{d} = 0,\n", .{32 - self.entries.items.len});
+    try writer.writeAll("\t};\n");
 }
 
 const Entry = struct {
@@ -119,7 +148,7 @@ const Entry = struct {
         return self;
     }
 
-    pub fn write(self: Entry, writer: std.fs.File.Writer) !void {
+    fn writeDescription(self: Entry, writer: std.fs.File.Writer) !void {
         if (self.description) |description| {
             try description.emit(writer, "\t\t///");
         } else if (self.summary) |summary| {
@@ -128,13 +157,26 @@ const Entry = struct {
                 try writer.print("\t\t/// {s}\n", .{line});
             }
         }
+    }
 
+    pub fn writeEnum(self: Entry, writer: std.fs.File.Writer) !void {
+        try self.writeDescription(writer);
         const invalid_name = !std.zig.isValidId(self.name);
         try writer.print("\t\t{s}{s}{s} = {s},\n", .{
             if (invalid_name) "@\"" else "",
             self.name,
             if (invalid_name) "\"" else "",
             self.value,
+        });
+    }
+
+    pub fn writeBitfield(self: Entry, writer: std.fs.File.Writer) !void {
+        try self.writeDescription(writer);
+        const invalid_name = !std.zig.isValidId(self.name);
+        try writer.print("\t\t{s}{s}{s}:bool = false,\n", .{
+            if (invalid_name) "@\"" else "",
+            self.name,
+            if (invalid_name) "\"" else "",
         });
     }
 };
