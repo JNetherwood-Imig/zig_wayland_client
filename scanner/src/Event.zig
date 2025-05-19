@@ -85,6 +85,8 @@ pub fn write(self: Self, writer: std.fs.File.Writer) !void {
         \\            inline for (@typeInfo(@This()).@"struct".fields) |field| {
         \\                if (field.type == []const u8 or field.type == [:0]const u8)
         \\                    self.self.proxy.gpa.free(@field(self, field.name));
+        \\                if (field.type == @import("os").File)
+        \\                    @field(self, field.name).close();
         \\            }
         \\        }
         \\
