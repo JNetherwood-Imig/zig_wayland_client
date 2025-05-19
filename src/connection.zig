@@ -1,27 +1,30 @@
-gpa: Allocator,
-socket: os.Socket,
-proxy_manager: ProxyManager,
-event_queue: EventQueue,
-cancel_pipe: os.Pipe,
-event_thread: std.Thread,
-proxy: wl.Display,
+var _gpa: Allocator = undefined;
+var socket: os.Socket = undefined;
+var proxy_manager: ProxyManager = undefined;
+var event_queue: EventQueue = undefined;
+var cancel_pipe: os.Pipe = undefined;
+var event_thread: std.Thread = undefined;
+var display: wl.Display = undefined;
 
 pub const ConnectInfo = union(enum) {
-    socket: i32,
+    fd: i32,
+    file: os.File,
+    socket: os.Socket,
+    std_file: std.fs.File,
+    stream: std.net.Stream,
     display: []const u8,
-};
 
-pub const GetConnectInfoError = error{MalformedWaylandSocket};
-
-pub fn getConnectInfo() GetConnectInfoError!ConnectInfo {
-    if (std.posix.getenv("WAYLAND_SOCKET")) |wayland_socket| {
-        const socket = std.fmt.parseInt(i32, wayland_socket, 10) catch
-            return error.MalformedWaylandSocket;
-        return ConnectInfo{ .socket = socket };
+    pub const DetectError = error{MalformedWaylandSocket};
+    pub fn detect() !ConnectInfo {
+        if (std.posix.getenv("WAYLAND_SOCKET")) |wayland_socket| {
+            const socket_fd = std.fmt.parseInt(i32, wayland_socket, 10) catch
+                return error.MalformedWaylandSocket;
+            return ConnectInfo{ .fd = socket_fd };
+        }
+        const wayland_display = std.posix.getenv("WAYLAND_DISPLAY") orelse "wayland-0";
+        return ConnectInfo{ .display = wayland_display };
     }
-    const wayland_display = std.posix.getenv("WAYLAND_DISPLAY") orelse "wayland-0";
-    return ConnectInfo{ .display = wayland_display };
-}
+};
 
 pub const InitError = Allocator.Error ||
     ConnectError ||
@@ -29,111 +32,89 @@ pub const InitError = Allocator.Error ||
     ProxyManager.GetProxyError ||
     std.Thread.SpawnError;
 
-pub fn init(gpa: Allocator, connect_info: anytype) InitError!*DisplayConnection {
-    const self = try gpa.create(DisplayConnection);
-    errdefer gpa.destroy(self);
-
-    self.gpa = gpa;
-    self.socket = try connect(connect_info);
-    self.proxy_manager = ProxyManager.init(gpa, self.socket.handle);
-    self.proxy = wl.Display{
-        .proxy = try self.proxy_manager.getNewProxy(wl.Display),
+pub fn init(gpa: Allocator, connect_info: ConnectInfo) InitError!void {
+    _gpa = gpa;
+    socket = try connect(connect_info);
+    proxy_manager = ProxyManager.init(gpa, socket.handle);
+    display = wl.Display{
+        .proxy = try proxy_manager.getNewProxy(wl.Display),
     };
-    self.event_queue = EventQueue.init(gpa);
-    self.cancel_pipe = try os.Pipe.create();
-    self.event_thread = try std.Thread.spawn(.{ .allocator = self.gpa }, pollEvents, .{self});
-
-    return self;
+    event_queue = EventQueue.init(gpa);
+    cancel_pipe = try os.Pipe.create();
+    event_thread = try std.Thread.spawn(.{ .allocator = gpa }, pollEvents, .{});
 }
 
-pub fn deinit(self: *DisplayConnection) void {
-    self.cancel_pipe.writeAll("1") catch {};
-    self.event_queue.cancel();
-    self.event_thread.join();
-    self.cancel_pipe.close();
-    self.event_queue.deinit();
-    self.proxy_manager.deinit();
-    self.socket.close();
-    self.gpa.destroy(self);
+pub fn deinit() void {
+    cancel_pipe.writeAll("1") catch {};
+    event_queue.cancel();
+    event_thread.join();
+    cancel_pipe.close();
+    event_queue.deinit();
+    proxy_manager.deinit();
+    socket.close();
 }
 
-pub fn waitNextEvent(self: *DisplayConnection) ?wl.Event {
-    return self.event_queue.wait();
+pub fn getDisplay() wl.Display {
+    return display;
 }
 
-pub fn getNextEvent(self: *DisplayConnection) ?wl.Event {
-    return self.event_queue.get();
+pub fn waitNextEvent() ?wl.Event {
+    return event_queue.wait();
 }
 
-pub fn sync(self: DisplayConnection) !wl.Callback {
-    return self.proxy.sync();
-}
-
-pub fn getRegistry(self: DisplayConnection) !wl.Registry {
-    return self.proxy.getRegistry();
+pub fn getNextEvent() ?wl.Event {
+    return event_queue.get();
 }
 
 const ConnectError = error{
     InvalidSocketFd,
     NoXdgRuntimeDir,
     SocketPathTooLong,
-} || GetConnectInfoError || os.Socket.CreateError || os.Socket.ConnectUnixError;
+} || os.Socket.CreateError || os.Socket.ConnectUnixError;
 
-fn connect(connect_info: anytype) ConnectError!os.Socket {
-    return if (@TypeOf(connect_info) == os.Socket)
-        connect_info
-    else if (@TypeOf(connect_info) == os.File)
-        os.Socket{ .handle = connect_info }
-    else switch (try connectInfoFromAny(connect_info)) {
-        .socket => |sockfd| try connectToSocket(sockfd),
-        .display => |display| try connectToDisplay(display),
-    };
-}
-
-inline fn connectInfoFromAny(connect_info: anytype) !ConnectInfo {
-    return if (@TypeOf(connect_info) == ConnectInfo)
-        connect_info
-    else switch (@typeInfo(@TypeOf(connect_info))) {
-        .int, .comptime_int => ConnectInfo{ .socket = @intCast(connect_info) },
-        .array => ConnectInfo{ .display = @ptrCast(&connect_info) },
-        .pointer => ConnectInfo{ .display = @ptrCast(connect_info) },
-        .void => try getConnectInfo(),
-        else => @compileError("Unsupported type for DisplayConnection.init"),
+fn connect(info: ConnectInfo) ConnectError!os.Socket {
+    return switch (info) {
+        .fd => |fd| try connectToSocket(fd),
+        .file => |file| try connectToSocket(file.handle),
+        .socket => |sock| try connectToSocket(sock.handle.handle),
+        .std_file => |std_file| try connectToSocket(std_file.handle),
+        .stream => |stream| try connectToSocket(stream.handle),
+        .display => |disp| try connectToDisplay(disp),
     };
 }
 
 fn connectToSocket(sockfd: i32) !os.Socket {
-    const socket = os.Socket{ .handle = .{ .handle = sockfd } };
-    var flags = socket.handle.getFlags() catch
+    const sock = os.Socket{ .handle = .{ .handle = sockfd } };
+    var flags = sock.handle.getFlags() catch
         return error.InvalidSocketFd;
     flags.cloexec = true;
-    socket.handle.setFlags(flags) catch unreachable;
-    return socket;
+    sock.handle.setFlags(flags) catch unreachable;
+    return sock;
 }
 
-fn connectToDisplay(display: []const u8) !os.Socket {
-    const socket = try os.Socket.create(.unix, .stream, .{ .cloexec = true }, null);
+fn connectToDisplay(disp: []const u8) !os.Socket {
+    const sock = try os.Socket.create(.unix, .stream, .{ .cloexec = true }, null);
     const xdg_runtime_dir = std.posix.getenv("XDG_RUNTIME_DIR") orelse
         return error.NoXdgRuntimeDir;
 
-    if (std.fs.path.isAbsolute(display)) {
-        try socket.connectUnix(display);
+    if (std.fs.path.isAbsolute(disp)) {
+        try sock.connectUnix(disp);
     } else {
         var buf: [108]u8 = @splat(0);
-        const path = std.fmt.bufPrint(&buf, "{s}/{s}", .{ xdg_runtime_dir, display }) catch
+        const path = std.fmt.bufPrint(&buf, "{s}/{s}", .{ xdg_runtime_dir, disp }) catch
             return error.SocketPathTooLong;
-        try socket.connectUnix(path);
+        try sock.connectUnix(path);
     }
 
-    return socket;
+    return sock;
 }
 
-fn pollEvents(self: *DisplayConnection) !void {
+fn pollEvents() !void {
     var pfds = [_]os.Pollfd{ .{
-        .fd = self.socket.handle,
+        .fd = socket.handle,
         .events = .{ .in = true },
     }, .{
-        .fd = self.cancel_pipe.getReadFile(),
+        .fd = cancel_pipe.getReadFile(),
         .events = .{ .in = true },
     } };
 
@@ -142,18 +123,18 @@ fn pollEvents(self: *DisplayConnection) !void {
         for (&pfds) |*pfd| {
             if (@as(u16, @bitCast(pfd.revents)) != 0) {
                 pfd.revents = .{};
-                if (pfd.fd == self.cancel_pipe.getReadFile()) return;
-                if (pfd.fd == self.socket.handle) try recieveEvent(self);
+                if (pfd.fd == cancel_pipe.getReadFile()) return;
+                if (pfd.fd == socket.handle) try recieveEvent();
             }
         }
     }
 }
 
-fn recieveEvent(self: *DisplayConnection) !void {
+fn recieveEvent() !void {
     var head: Header = undefined;
-    _ = try self.socket.handle.read(std.mem.asBytes(&head));
+    _ = try socket.handle.read(std.mem.asBytes(&head));
 
-    const event = try self.parseEvent(head);
+    const event = try parseEvent(head);
     switch (event) {
         .display_error => |err| {
             defer err.deinit();
@@ -163,13 +144,13 @@ fn recieveEvent(self: *DisplayConnection) !void {
                 err.message,
             });
         },
-        .display_delete_id => |delete_id| try self.proxy_manager.deleteId(delete_id.id),
-        else => try self.event_queue.emplace(event),
+        .display_delete_id => |delete_id| try proxy_manager.deleteId(delete_id.id),
+        else => try event_queue.emplace(event),
     }
 }
 
-pub fn parseEvent(self: *DisplayConnection, header: Header) !wl.Event {
-    const event0_index = self.proxy_manager.proxy_type_references.items[header.object];
+pub fn parseEvent(header: Header) !wl.Event {
+    const event0_index = proxy_manager.proxy_type_references.items[header.object];
     const tag_name = @tagName(@as(wl.EventType, @enumFromInt(event0_index + header.opcode)));
     @setEvalBranchQuota(2048);
     inline for (@typeInfo(wl.Event).@"union".fields) |field| {
@@ -179,10 +160,10 @@ pub fn parseEvent(self: *DisplayConnection, header: Header) !wl.Event {
             var struct_value: struct_type = undefined;
             struct_value.self = .{ .proxy = .{
                 .id = header.object,
-                .gpa = self.gpa,
+                .gpa = _gpa,
                 .event0_index = event0_index,
-                .manager = &self.proxy_manager,
-                .socket = self.socket.handle,
+                .manager = &proxy_manager,
+                .socket = socket.handle,
             } };
 
             const size = header.length - @sizeOf(Header);
@@ -195,12 +176,12 @@ pub fn parseEvent(self: *DisplayConnection, header: Header) !wl.Event {
                 break :count count;
             };
 
-            const buf = try self.gpa.alloc(u8, size);
-            defer self.gpa.free(buf);
+            const buf = try _gpa.alloc(u8, size);
+            defer _gpa.free(buf);
 
             var fds: [fd_count]os.File = undefined;
             if (size != 0) {
-                const read = try self.socket.handle.recieveMessage(@TypeOf(fds), &fds, buf, 0);
+                const read = try socket.handle.recieveMessage(@TypeOf(fds), &fds, buf, 0);
                 std.debug.assert(read == size);
             }
 
@@ -226,14 +207,14 @@ pub fn parseEvent(self: *DisplayConnection, header: Header) !wl.Event {
                         const len = std.mem.bytesToValue(u32, buf[index .. index + 4]);
                         index += 4;
                         const rounded_len = roundup4(len);
-                        @field(struct_value, s_field.name) = try self.gpa.dupe(u8, buf[index .. index + len]);
+                        @field(struct_value, s_field.name) = try _gpa.dupe(u8, buf[index .. index + len]);
                         index += rounded_len;
                     },
                     String => {
                         const len = std.mem.bytesToValue(u32, buf[index .. index + 4]);
                         index += 4;
                         const rounded_len = roundup4(len);
-                        @field(struct_value, s_field.name) = try self.gpa.dupeZ(u8, buf[index .. index + len - 1]);
+                        @field(struct_value, s_field.name) = try _gpa.dupeZ(u8, buf[index .. index + len - 1]);
                         index += rounded_len;
                     },
                     os.File => {
@@ -263,11 +244,11 @@ pub fn parseEvent(self: *DisplayConnection, header: Header) !wl.Event {
                             } else { // Object
                                 comptime std.debug.assert(@hasField(s_field.type, "proxy"));
                                 const proxy = Proxy{
-                                    .gpa = self.gpa,
+                                    .gpa = _gpa,
                                     .id = int_value,
                                     .event0_index = event0_index,
-                                    .socket = self.socket.handle,
-                                    .manager = &self.proxy_manager,
+                                    .socket = socket.handle,
+                                    .manager = &proxy_manager,
                                 };
                                 @field(struct_value, s_field.name) = s_field.type{ .proxy = proxy };
                             }
@@ -281,8 +262,6 @@ pub fn parseEvent(self: *DisplayConnection, header: Header) !wl.Event {
     }
     unreachable;
 }
-
-const DisplayConnection = @This();
 
 const std = @import("std");
 const wl = @import("wayland_client_protocol");
