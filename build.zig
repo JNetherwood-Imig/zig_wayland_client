@@ -5,10 +5,12 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const scanner = b.dependency("scanner", .{
+    const scanner = b.addExecutable(.{
+        .name = "scanner",
         .target = target,
         .optimize = optimize,
-    }).artifact("scanner");
+        .root_source_file = b.path("scanner/scanner.zig"),
+    });
 
     const generate_files = b.addWriteFiles();
 
