@@ -6,7 +6,6 @@ const State = @This();
 
 // Assorted app objects
 gpa: std.mem.Allocator,
-connection: *wl.DisplayConnection,
 
 // Wayland globals
 display: wl.Display,
@@ -33,9 +32,9 @@ pointer_event: PointerEvent,
 kb_state: wlkb.State,
 
 pub fn init(gpa: std.mem.Allocator) !State {
+    try wl.connection.init(gpa, try wl.connection.ConnectInfo.detect());
     var self: State = undefined;
     self.gpa = gpa;
-    self.connection = try wl.DisplayConnection.init(gpa, {});
     self.width = 640;
     self.height = 480;
     self.offset = 0.0;
@@ -45,11 +44,11 @@ pub fn init(gpa: std.mem.Allocator) !State {
     self.touch.proxy.id = 0;
     self.pointer_event.mask = .{};
 
-    self.display = self.connection.proxy;
+    self.display = wl.connection.getDisplay();
     self.registry = try self.display.getRegistry();
     _ = try self.display.sync();
 
-    while (self.connection.waitNextEvent()) |ev| switch (ev) {
+    while (wl.connection.waitNextEvent()) |ev| switch (ev) {
         .registry_global => |g| {
             defer g.deinit();
             if (matchGlobal(g, wl.Compositor)) {
@@ -84,7 +83,7 @@ pub fn init(gpa: std.mem.Allocator) !State {
 }
 
 pub fn run(self: *State) !void {
-    while (self.connection.waitNextEvent()) |ev| {
+    while (wl.connection.waitNextEvent()) |ev| {
         defer ev.deinit();
         switch (ev) {
             .xdg_toplevel_close => break,
@@ -263,8 +262,8 @@ pub fn run(self: *State) !void {
 }
 
 pub fn deinit(self: State) void {
-    // c.xkb_context_unref(self.xkb_context);
-    self.connection.deinit();
+    _ = self;
+    wl.connection.deinit();
 }
 
 fn drawFrame(self: *const State) !wl.Buffer {
