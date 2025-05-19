@@ -1,6 +1,6 @@
 const std = @import("std");
 const wl = @import("wayland_client");
-const xkb = @import("xkb");
+const wlkb = @import("wlkb");
 
 const State = @This();
 
@@ -30,9 +30,7 @@ height: usize,
 offset: f32,
 last_frame: u32,
 pointer_event: PointerEvent,
-xkb_state: *xkb.State,
-xkb_context: *xkb.Context,
-xkb_keymap: *xkb.Keymap,
+kb_state: wlkb.State,
 
 pub fn init(gpa: std.mem.Allocator) !State {
     var self: State = undefined;
@@ -46,7 +44,6 @@ pub fn init(gpa: std.mem.Allocator) !State {
     self.keyboard.proxy.id = 0;
     self.touch.proxy.id = 0;
     self.pointer_event.mask = .{};
-    self.xkb_context = xkb.Context.new(.no_flags) orelse return error.XkbContextNewFailed;
 
     self.display = self.connection.proxy;
     self.registry = try self.display.getRegistry();
@@ -236,18 +233,8 @@ pub fn run(self: *State) !void {
                 }
             },
             .keyboard_keymap => |keymap| {
-                std.debug.assert(keymap.format == .xkb_v1);
                 defer keymap.fd.close();
-                const map_shm = try std.posix.mmap(null, keymap.size, std.posix.PROT.READ, .{ .TYPE = .SHARED }, keymap.fd, 0);
-                defer std.posix.munmap(map_shm);
-                const xkb_keymap = xkb.Keymap.newFromString(self.xkb_context, @ptrCast(map_shm), .text_v1, .no_flags) orelse
-                    return error.XkbKeymapNewFromStringFailed;
-                const xkb_state = xkb.State.new(xkb_keymap) orelse return error.XkbStateNewFailed;
-                // TODO make nullable and check for null?
-                self.xkb_keymap.unref();
-                self.xkb_state.unref();
-                self.xkb_keymap = xkb_keymap;
-                self.xkb_state = xkb_state;
+                // TODO handle keymap
             },
             .keyboard_enter => |enter| {
                 _ = enter;
@@ -276,7 +263,7 @@ pub fn run(self: *State) !void {
 }
 
 pub fn deinit(self: State) void {
-    self.xkb_context.unref();
+    // c.xkb_context_unref(self.xkb_context);
     self.connection.deinit();
 }
 

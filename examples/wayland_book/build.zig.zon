@@ -8,9 +8,9 @@
         .wayland_client = .{
             .path = "../..",
         },
-        .xkb = .{
-            .url = "git+https://github.com/ifreund/zig-xkbcommon.git#87e0910e12af79cbb74a37143c881abea32c96b7",
-            .hash = "xkbcommon-0.4.0-dev-VDqIe3a9AQDQa1H4Vh7__mVphznD-7tyNWdnjFgf-9fC",
+        .wlkb = .{
+            .url = "git+https://github.com/JNetherwood-Imig/wlkb.git#61aad41363e6a14317fef0f8395000177d5e24c0",
+            .hash = "wlkb-0.0.1-jP33NeICAAAqJAujdkJtwMBxEXohvMAumNN_ynp9z-Kq",
         },
     },
 
