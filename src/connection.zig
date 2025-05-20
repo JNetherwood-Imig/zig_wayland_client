@@ -1,6 +1,5 @@
-var _gpa: Allocator = undefined;
+var alloc: Allocator = undefined;
 var socket: os.Socket = undefined;
-var proxy_manager: ProxyManager = undefined;
 var event_queue: EventQueue = undefined;
 var cancel_pipe: os.Pipe = undefined;
 var event_thread: std.Thread = undefined;
@@ -29,15 +28,14 @@ pub const ConnectInfo = union(enum) {
 pub const InitError = Allocator.Error ||
     ConnectError ||
     os.Pipe.CreateError ||
-    ProxyManager.GetProxyError ||
     std.Thread.SpawnError;
 
 pub fn init(gpa: Allocator, connect_info: ConnectInfo) InitError!void {
-    _gpa = gpa;
+    alloc = gpa;
     socket = try connect(connect_info);
-    proxy_manager = ProxyManager.init(gpa, socket.handle);
+    try pm.init(gpa, socket);
     display = wl.Display{
-        .proxy = try proxy_manager.getNewProxy(wl.Display),
+        .proxy = .{ .id = 1, .event0_index = 0 },
     };
     event_queue = EventQueue.init(gpa);
     cancel_pipe = try os.Pipe.create();
@@ -50,7 +48,6 @@ pub fn deinit() void {
     event_thread.join();
     cancel_pipe.close();
     event_queue.deinit();
-    proxy_manager.deinit();
     socket.close();
 }
 
@@ -144,7 +141,7 @@ fn recieveEvent() !void {
                 err.message,
             });
         },
-        .display_delete_id => |delete_id| try proxy_manager.deleteId(delete_id.id),
+        .display_delete_id => |delete_id| try pm.deleteId(delete_id.id),
         else => try event_queue.emplace(event),
     }
 }
@@ -270,7 +267,7 @@ const core = @import("core");
 const m = core.message_utils;
 const testing = std.testing;
 const roundup4 = m.roundup4;
-const ProxyManager = core.ProxyManager;
+const pm = core.proxy_manager;
 const Proxy = core.Proxy;
 const EventQueue = @import("EventQueue.zig");
 const Allocator = std.mem.Allocator;

@@ -2,7 +2,7 @@ pub const String = [:0]const u8;
 
 pub const Array = []const u8;
 
-pub const Header = packed struct {
+pub const Header = packed struct(u64) {
     object: u32,
     opcode: u16,
     length: u16,
