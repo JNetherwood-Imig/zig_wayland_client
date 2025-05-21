@@ -48,8 +48,8 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    const core = b.createModule(.{
-        .root_source_file = b.path("src/core.zig"),
+    const shared = b.createModule(.{
+        .root_source_file = b.path("src/shared.zig"),
         .target = target,
         .optimize = optimize,
         .imports = &.{
@@ -63,7 +63,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .imports = &.{
             .{ .name = "os", .module = os },
-            .{ .name = "core", .module = core },
+            .{ .name = "shared", .module = shared },
         },
     });
 
@@ -73,7 +73,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .imports = &.{
             .{ .name = "os", .module = os },
-            .{ .name = "core", .module = core },
+            .{ .name = "shared", .module = shared },
             .{ .name = "wayland_client_protocol", .module = wayland_client_protocol },
         },
     });
@@ -86,8 +86,8 @@ pub fn build(b: *std.Build) void {
         .use_lld = false,
     });
 
-    const core_test = b.addTest(.{
-        .root_module = core,
+    const shared_test = b.addTest(.{
+        .root_module = shared,
         .target = target,
         .optimize = optimize,
         .use_llvm = false,
@@ -103,11 +103,11 @@ pub fn build(b: *std.Build) void {
     });
 
     const run_os_test = b.addRunArtifact(os_test);
-    const run_core_test = b.addRunArtifact(core_test);
+    const run_shared_test = b.addRunArtifact(shared_test);
     const run_wayland_client_test = b.addRunArtifact(wayland_client_test);
 
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_os_test.step);
-    test_step.dependOn(&run_core_test.step);
+    test_step.dependOn(&run_shared_test.step);
     test_step.dependOn(&run_wayland_client_test.step);
 }

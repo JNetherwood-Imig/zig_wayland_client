@@ -376,13 +376,38 @@ pub const File = packed struct(i32) {
         };
     }
 
-    // pub fn recieveMessage(self: File, comptime T: type, out_data: *T, buf: []u8, flags: u32) !usize {
-    //     _ = out_data;
-    //     _ = flags;
-    //     return self.read(buf);
-    // }
+    const RecvError = error{
+        WouldBlock,
+        BadFileDescriptor,
+        ConnectionRefused,
+        BadAddress,
+        Interrupted,
+        InvalidArgument,
+        OutOfMemory,
+        NotConnected,
+        NotASocket,
+    };
 
-    pub fn recieveMessage(self: File, comptime T: type, out_data: *T, buf: []u8, flags: u32) !usize {
+    fn recv(self: File, buf: []u8, flags: MessageFlags) RecvError!usize {
+        const ret = system.recvfrom(self.handle, buf.ptr, buf.len, flags.toInt(u32), null, null);
+        return switch (errno(ret)) {
+            .SUCCESS => ret,
+            .AGAIN => error.WouldBlock,
+            .BADF => error.BadFileDescriptor,
+            .CONNREFUSED => error.ConnectionRefused,
+            .FAULT => error.BadAddress,
+            .INTR => error.Interrupted,
+            .NOMEM => error.OutOfMemory,
+            .NOTCONN => error.NotConnected,
+            .NOTSOCK => error.NotASocket,
+        };
+    }
+
+    pub inline fn peek(self: File, buf: []u8) RecvError!usize {
+        return self.recv(buf, .{ .peek = true });
+    }
+
+    pub fn recieveMessage(self: File, comptime T: type, out_data: *T, buf: []u8, flags: u32) RecvError!usize {
         var iov = std.posix.iovec{ .base = buf.ptr, .len = buf.len };
         var cmsg_buf = [_]u8{0} ** (@sizeOf(CmsgHdr) + @sizeOf(T));
         var msg = system.msghdr{
