@@ -1,5 +1,19 @@
+const std = @import("std");
+const Socket = @import("Socket.zig");
+const Proxy = @import("Proxy.zig");
+const Allocator = std.mem.Allocator;
+const Mutex = std.Thread.Mutex;
+const EventIdList = std.ArrayList(u32);
+const FreeList = std.PriorityQueue(u32, void, struct {
+    pub fn lessThan(_: void, a: u32, b: u32) std.math.Order {
+        return std.math.order(a, b);
+    }
+}.lessThan);
+
+const ProxyManager = @This();
+
 gpa: Allocator,
-socket: os.File,
+socket: Socket,
 next_id: u32,
 free_list: FreeList,
 proxy_type_references: EventIdList,
@@ -8,7 +22,7 @@ mutex: Mutex,
 const min_id = 0x00000001;
 const max_id = 0xFEFFFFFF;
 
-pub fn init(gpa: Allocator, socket: os.File) ProxyManager {
+pub fn init(gpa: Allocator, socket: Socket) ProxyManager {
     return ProxyManager{
         .gpa = gpa,
         .socket = socket,
@@ -60,17 +74,3 @@ pub fn deleteId(self: *ProxyManager, id: u32) DeleteIdError!void {
     defer self.mutex.unlock();
     try self.free_list.add(id);
 }
-
-const ProxyManager = @This();
-
-const std = @import("std");
-const os = @import("os");
-const Proxy = @import("Proxy.zig");
-const Allocator = std.mem.Allocator;
-const Mutex = std.Thread.Mutex;
-const EventIdList = std.ArrayList(u32);
-const FreeList = std.PriorityQueue(u32, void, struct {
-    pub fn lessThan(_: void, a: u32, b: u32) std.math.Order {
-        return std.math.order(a, b);
-    }
-}.lessThan);

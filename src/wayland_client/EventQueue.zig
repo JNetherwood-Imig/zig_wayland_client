@@ -51,6 +51,8 @@ pub fn cancel(self: *EventQueue) void {
 const EventQueue = @This();
 
 const std = @import("std");
-const wl = @import("wayland_client_protocol");
+const wl = @import("protocol");
+// FIXME Switch queue to a .Static 64 queue once more advanced synchronization is in place
+// which will pause reading until the queue has space
 const Queue = std.fifo.LinearFifo(wl.Event, .Dynamic);
 const Thread = std.Thread;

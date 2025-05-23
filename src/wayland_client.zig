@@ -1,7 +1,6 @@
-pub usingnamespace @import("wayland_client_protocol");
-pub const DisplayConnection = @import("DisplayConnection.zig");
-pub const Fixed = @import("core").Fixed;
-pub const os = @import("os");
+pub usingnamespace @import("protocol");
+pub const DisplayConnection = @import("wayland_client/DisplayConnection.zig");
+pub const Fixed = @import("shared").Fixed;
 
 test {
     @import("std").testing.refAllDecls(@This());

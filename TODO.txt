@@ -1,0 +1,7 @@
+Refactor to use threadlocal scratch buffers for serialization and deserialization
+Fix display error handling
+Change array arguments to be anytype on request side and *anyopaque on event side
+Finish/polish os layer and add BSD
+Define error sets for every public API function
+Break up functions into more easily testable units
+ADD UNIT TESTS

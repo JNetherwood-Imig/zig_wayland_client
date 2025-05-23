@@ -1,7 +1,20 @@
+const std = @import("std");
+const os = @import("os");
+const m = @import("message_utils.zig");
+const roundup4 = m.roundup4;
+const Fixed = @import("Fixed.zig");
+const ProxyManager = @import("ProxyManager.zig");
+const Allocator = std.mem.Allocator;
+const GenericNewId = m.GenericNewId;
+const Array = m.Array;
+const String = m.String;
+const Header = m.Header;
+
+const Proxy = @This();
+
 gpa: Allocator,
 id: u32,
 event0_index: usize,
-socket: os.File,
 manager: *ProxyManager,
 
 pub fn marshalCreateArgs(
@@ -220,17 +233,3 @@ test "serializeArgs" {
 
     try std.testing.expectEqual(buf, expected);
 }
-
-const Proxy = @This();
-
-const std = @import("std");
-const os = @import("os");
-const m = @import("message_utils.zig");
-const roundup4 = m.roundup4;
-const Fixed = @import("Fixed.zig");
-const ProxyManager = @import("ProxyManager.zig");
-const Allocator = std.mem.Allocator;
-const GenericNewId = m.GenericNewId;
-const Array = m.Array;
-const String = m.String;
-const Header = m.Header;
